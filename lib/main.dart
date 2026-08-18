@@ -20,6 +20,7 @@ class DroidPurifierApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xffb7f34a),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xff090c10),
+        visualDensity: VisualDensity.compact,
       ),
       home: const HomePage(),
     );
@@ -45,6 +46,7 @@ class _HomePageState extends State<HomePage> {
   List<String> _backupPackages = <String>[];
   String _search = '';
   String _filter = 'All';
+  String? _activePreset;
   int _tab = 0;
   bool _loading = false;
   bool _busy = false;
@@ -121,16 +123,6 @@ class _HomePageState extends State<HomePage> {
   List<String> get _safeVisiblePackages => _visiblePackages.where((packageName) {
         final risk = _risk(packageName);
         if (risk.protected) return false;
-
-        if (_filter == 'De-Google' || _filter == 'Google namespace') {
-          return risk.autoSelect &&
-              (risk.level == RiskLevel.low || risk.level == RiskLevel.medium);
-        }
-
-        if (RiskDatabase.manufacturerBloat.contains(packageName)) {
-          return risk.level == RiskLevel.low || risk.level == RiskLevel.medium;
-        }
-
         return risk.autoSelect &&
             (risk.level == RiskLevel.low || risk.level == RiskLevel.medium);
       }).toList();
@@ -232,78 +224,80 @@ class _HomePageState extends State<HomePage> {
       _selected.clear();
       _packages = <String>[];
       _apexPackages = <String>{};
+      _activePreset = null;
     });
     await _loadPackages();
   }
 
-  void _applyRecommendedDeGoogle() {
-    var added = 0;
+  void _replaceSelection(
+    Iterable<String> packages, {
+    required String preset,
+    String? filter,
+  }) {
     setState(() {
-      for (final packageName in _packages) {
-        if (_isRecommended(packageName) && _selected.add(packageName)) added++;
-      }
-      _filter = 'De-Google';
+      _selected
+        ..clear()
+        ..addAll(packages.where((packageName) => !_protected(packageName)));
+      _activePreset = preset;
+      if (filter != null) _filter = filter;
     });
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          'Recommended De-Google: $added package(s) added. Play Services, GSF and Play Store are kept by this preset.',
-        ),
+        duration: const Duration(seconds: 2),
+        content: Text('${_selected.length} packages selected.'),
       ),
+    );
+  }
+
+  void _applyRecommendedDeGoogle() {
+    _replaceSelection(
+      _packages.where(_isRecommended),
+      preset: 'recommended',
+      filter: 'De-Google',
     );
   }
 
   void _applyFullDeGoogle() {
-    var added = 0;
-    setState(() {
-      for (final packageName in _packages) {
-        if (_isFull(packageName) && _selected.add(packageName)) added++;
-      }
-      _filter = 'De-Google';
-    });
-
-    final manual = _manualGoogleCount;
-    final core = _googleCoreCount;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 7),
-        content: Text(
-          'Full De-Google: $added package(s) added. $manual package(s) need manual review/replacements; $core Android-core Google-namespaced package(s) stay protected.',
-        ),
-      ),
+    _replaceSelection(
+      _packages.where(_isFull),
+      preset: 'full',
+      filter: 'De-Google',
     );
   }
 
   void _applyManufacturerBloatware() {
-    var added = 0;
-    setState(() {
-      for (final packageName in _packages) {
-        if (RiskDatabase.manufacturerBloat.contains(packageName) &&
-            !_protected(packageName) &&
-            _selected.add(packageName)) {
-          added++;
-        }
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Manufacturer Bloatware: $added package(s) added. Review before removal.',
-        ),
-      ),
+    _replaceSelection(
+      _packages.where((packageName) =>
+          RiskDatabase.manufacturerBloat.contains(packageName) &&
+          !_protected(packageName)),
+      preset: 'oem',
     );
   }
 
   void _selectSafeVisible() {
-    final safe = _safeVisiblePackages;
-    setState(() => _selected.addAll(safe));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${safe.length} curated low/medium-risk package(s) selected. High/Critical, unknown and Android-core packages were skipped.',
-        ),
-      ),
-    );
+    setState(() {
+      _selected.addAll(_safeVisiblePackages);
+      _activePreset = null;
+    });
+  }
+
+  void _togglePackage(String packageName) {
+    setState(() {
+      if (_selected.contains(packageName)) {
+        _selected.remove(packageName);
+      } else {
+        _selected.add(packageName);
+      }
+      _activePreset = null;
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selected.clear();
+      _activePreset = null;
+    });
   }
 
   Future<void> _reviewAndRemove() async {
@@ -338,65 +332,55 @@ class _HomePageState extends State<HomePage> {
           return AlertDialog(
             title: Text('Remove ${packages.length} selected package(s)?'),
             content: SizedBox(
-              width: 720,
-              height: 550,
+              width: 700,
+              height: 500,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Packages are removed only for Android user 0. Protected Android core/Mainline packages cannot enter this list.',
-                  ),
-                  if (includesGoogleFramework) ...[
-                    const SizedBox(height: 10),
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(Icons.warning_amber_rounded,
-                                color: Colors.orangeAccent),
-                            SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                'Full De-Google includes Google framework components. Basic Android should remain intact, but third-party apps that require Play Services, FCM, Google APIs or Play Integrity can stop working.',
-                              ),
+                  if (includesGoogleFramework)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              color: Colors.orangeAccent),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Full De-Google can break apps that depend on Play Services, FCM or Google APIs.',
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
                   SwitchListTile(
+                    dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Back up APK files first'),
-                    subtitle: const Text(
-                      'If backup fails, that package will not be removed.',
-                    ),
                     value: backup,
                     onChanged: (value) => setLocalState(() => backup = value),
                   ),
                   if (dangerous.isNotEmpty) ...[
                     Text(
-                      '${dangerous.length} High/Critical package(s) selected. Type CONFIRM:',
+                      '${dangerous.length} High/Critical package(s). Type CONFIRM:',
                       style: const TextStyle(
                         color: Colors.orangeAccent,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     TextField(
                       controller: controller,
                       onChanged: (_) => setLocalState(() {}),
-                      decoration: const InputDecoration(hintText: 'CONFIRM'),
+                      decoration: const InputDecoration(
+                        hintText: 'CONFIRM',
+                        isDense: true,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                   ],
-                  const Text(
-                    'Selected packages',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
+                  const Divider(),
                   Expanded(
                     child: ListView.builder(
                       itemCount: packages.length,
@@ -405,6 +389,7 @@ class _HomePageState extends State<HomePage> {
                         final risk = _risk(packageName);
                         return ListTile(
                           dense: true,
+                          visualDensity: VisualDensity.compact,
                           title: Text(risk.name),
                           subtitle: Text(packageName),
                           trailing: _riskBadge(risk.level),
@@ -453,14 +438,14 @@ class _HomePageState extends State<HomePage> {
           child: AlertDialog(
             title: const Text('Removing selected packages'),
             content: SizedBox(
-              width: 520,
+              width: 500,
               child: ValueListenableBuilder<String>(
                 valueListenable: progress,
                 builder: (context, value, child) => Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const LinearProgressIndicator(),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     Text(value),
                   ],
                 ),
@@ -476,7 +461,7 @@ class _HomePageState extends State<HomePage> {
       try {
         if (_protected(packageName)) {
           failures[packageName] =
-              'Package became protected by the current Android safety policy.';
+              'Package became protected by the Android safety policy.';
           continue;
         }
         if (backup) {
@@ -508,6 +493,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _busy = false;
       _selected.clear();
+      _activePreset = null;
     });
     await _loadPackages();
     if (!mounted) return;
@@ -515,23 +501,24 @@ class _HomePageState extends State<HomePage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Bulk removal results'),
+        title: const Text('Removal complete'),
         content: SizedBox(
-          width: 620,
+          width: 600,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('$succeeded removed. ${failures.length} failed/skipped.'),
               if (failures.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 280),
+                  constraints: const BoxConstraints(maxHeight: 260),
                   child: ListView(
                     shrinkWrap: true,
                     children: failures.entries
                         .map(
                           (entry) => ListTile(
+                            dense: true,
                             title: Text(entry.key),
                             subtitle: Text(entry.value),
                           ),
@@ -595,17 +582,19 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 56,
+        titleSpacing: 20,
         title: const Row(
           children: [
             Icon(Icons.cleaning_services_rounded),
-            SizedBox(width: 10),
+            SizedBox(width: 9),
             Text('Droid Purifier'),
           ],
         ),
         actions: [
           if (_device != null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: DropdownButton<String>(
                 value: _device!.id,
                 items: _devices
@@ -622,10 +611,10 @@ class _HomePageState extends State<HomePage> {
             ),
           IconButton(
             onPressed: _busy ? null : _refreshDevices,
-            tooltip: 'Refresh devices',
+            tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -651,36 +640,27 @@ class _HomePageState extends State<HomePage> {
   Widget _emptyState() {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620),
+        constraints: const BoxConstraints(maxWidth: 560),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.phone_android, size: 72),
-            const SizedBox(height: 18),
+            const Icon(Icons.phone_android, size: 64),
+            const SizedBox(height: 14),
             const Text(
               'Connect an Android device',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             const Text(
-              'Enable USB debugging, connect the phone, and approve the RSA prompt. ADB is bundled with release builds.',
+              'Enable USB debugging and approve the RSA prompt.',
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: _loading ? null : _refreshDevices,
               icon: const Icon(Icons.refresh),
               label: const Text('Detect devices'),
             ),
-            if (_devices.any((item) => !item.ready)) ...[
-              const SizedBox(height: 16),
-              ..._devices.where((item) => !item.ready).map(
-                    (item) => Text(
-                      '${item.id}: ${item.status}',
-                      style: const TextStyle(color: Colors.orangeAccent),
-                    ),
-                  ),
-            ],
           ],
         ),
       ),
@@ -691,30 +671,32 @@ class _HomePageState extends State<HomePage> {
     final device = _device!;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
+        Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+          ),
           child: Row(
             children: [
-              Text('${device.manufacturer} ${device.model}'),
-              const SizedBox(width: 18),
+              Text(
+                '${device.manufacturer} ${device.model}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 16),
               Text(
                 'Android ${device.androidVersion}${device.sdkInt == null ? '' : ' • API ${device.sdkInt}'}',
               ),
-              const SizedBox(width: 18),
-              Text('Battery ${device.battery}'),
+              const SizedBox(width: 16),
+              Text('${device.battery} battery'),
               const Spacer(),
               SegmentedButton<int>(
+                showSelectedIcon: false,
                 segments: const [
-                  ButtonSegment(
-                    value: 0,
-                    icon: Icon(Icons.apps),
-                    label: Text('Debloat'),
-                  ),
-                  ButtonSegment(
-                    value: 1,
-                    icon: Icon(Icons.restore),
-                    label: Text('Restore'),
-                  ),
+                  ButtonSegment(value: 0, label: Text('Debloat')),
+                  ButtonSegment(value: 1, label: Text('Restore')),
                 ],
                 selected: {_tab},
                 onSelectionChanged: _busy
@@ -724,7 +706,6 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        const Divider(height: 1),
         Expanded(child: _tab == 0 ? _debloatView() : _restoreView()),
       ],
     );
@@ -733,137 +714,162 @@ class _HomePageState extends State<HomePage> {
   Widget _debloatView() {
     final visible = _visiblePackages;
     final safeVisible = _safeVisiblePackages;
+
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Installed apps',
-                      style:
-                          TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'De-Google presets remove Google apps/services while Android core modules stay protected.',
-                    ),
-                  ],
-                ),
+              const Text(
+                'Apps',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
+              const SizedBox(width: 12),
+              Text(
+                '${_packages.length} installed',
+                style: TextStyle(color: Theme.of(context).colorScheme.outline),
+              ),
+              const Spacer(),
               if (_selected.isNotEmpty)
                 FilledButton.icon(
                   onPressed: _busy ? null : _reviewAndRemove,
-                  icon: const Icon(Icons.delete_sweep),
-                  label: Text('Review & remove (${_selected.length})'),
+                  icon: const Icon(Icons.delete_sweep, size: 19),
+                  label: Text('Remove (${_selected.length})'),
                 ),
             ],
           ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Theme.of(context).colorScheme.outline),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_outlined),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Compatibility protection: ${_apexPackages.length} APEX/Mainline package(s) detected and locked. Unknown future Google packages are never auto-selected. Google-namespaced Android core packages are labeled as Android core, not “Google bloatware.”',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _presetButton(
-                'Recommended De-Google',
-                '$_recommendedCount matches • apps + non-core Google services • keeps Play Services / GSF / Play Store',
-                Icons.verified_user_outlined,
-                _applyRecommendedDeGoogle,
-              ),
-              _presetButton(
-                'Full De-Google',
-                '$_fullCount matches • adds Play Services / GSF / Play Store • Android core stays protected',
-                Icons.gpp_good_outlined,
-                _applyFullDeGoogle,
-              ),
-              _presetButton(
-                'Manufacturer Bloatware',
-                '$_manufacturerCount matches • Samsung / Xiaomi / OPPO / realme',
-                Icons.factory_outlined,
-                _applyManufacturerBloatware,
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  onChanged: (value) => setState(() => _search = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    hintText: 'Search package, app name or description',
-                    border: OutlineInputBorder(),
-                  ),
+                child: _presetChoice(
+                  keyName: 'recommended',
+                  title: 'Recommended',
+                  count: _recommendedCount,
+                  icon: Icons.verified_user_outlined,
+                  tooltip:
+                      'Removes Google apps and non-core Google services. Keeps Play Services, GSF and Play Store.',
+                  onPressed: _applyRecommendedDeGoogle,
                 ),
               ),
-              const SizedBox(width: 10),
-              DropdownButton<String>(
-                value: _filter,
-                items: const [
-                  'All',
-                  'De-Google',
-                  'Google namespace',
-                  'Android core',
-                  'Low risk',
-                  'Review',
-                ]
-                    .map(
-                      (value) =>
-                          DropdownMenuItem(value: value, child: Text(value)),
-                    )
-                    .toList(),
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(() => _filter = value ?? 'All'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _presetChoice(
+                  keyName: 'full',
+                  title: 'Full De-Google',
+                  count: _fullCount,
+                  icon: Icons.gpp_good_outlined,
+                  tooltip:
+                      'Also selects Play Services, GSF and Play Store. Android core stays protected.',
+                  onPressed: _applyFullDeGoogle,
+                ),
               ),
-              const SizedBox(width: 10),
-              OutlinedButton(
-                onPressed:
-                    _busy || safeVisible.isEmpty ? null : _selectSafeVisible,
-                child: Text('Select safe shown (${safeVisible.length})'),
-              ),
-              TextButton(
-                onPressed: _busy || _selected.isEmpty
-                    ? null
-                    : () => setState(() => _selected.clear()),
-                child: const Text('Clear'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _presetChoice(
+                  keyName: 'oem',
+                  title: 'OEM Bloatware',
+                  count: _manufacturerCount,
+                  icon: Icons.factory_outlined,
+                  tooltip: 'Curated Samsung, Xiaomi, OPPO, realme and OEM extras.',
+                  onPressed: _applyManufacturerBloatware,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            '${visible.length} shown • ${_packages.length} installed • ${_selected.length} selected • $_manualGoogleCount Google package(s) manual-review • $_googleCoreCount Google-namespaced Android-core',
+          Row(
+            children: [
+              Icon(
+                Icons.shield_outlined,
+                size: 17,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$_googleCoreCount Android-core Google packages protected • ${_apexPackages.length} Mainline/APEX locked • $_manualGoogleCount manual-review',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              Tooltip(
+                message:
+                    'Unknown future Google packages are never auto-selected. Android core packages remain locked on old and new Android versions.',
+                child: const Icon(Icons.info_outline, size: 17),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 9),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: TextField(
+                    onChanged: (value) => setState(() => _search = value),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search, size: 20),
+                      hintText: 'Search apps or packages',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 44,
+                child: DropdownButton<String>(
+                  value: _filter,
+                  items: const [
+                    'All',
+                    'De-Google',
+                    'Google namespace',
+                    'Android core',
+                    'Low risk',
+                    'Review',
+                  ]
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _filter = value ?? 'All'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed:
+                    _busy || safeVisible.isEmpty ? null : _selectSafeVisible,
+                child: Text('Select safe (${safeVisible.length})'),
+              ),
+              const SizedBox(width: 4),
+              TextButton(
+                onPressed:
+                    _busy || _selected.isEmpty ? null : _clearSelection,
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${visible.length} shown • ${_selected.length} selected',
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 6),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : Card(
+                    margin: EdgeInsets.zero,
                     clipBehavior: Clip.antiAlias,
                     child: ListView.separated(
                       itemCount: visible.length,
@@ -873,49 +879,55 @@ class _HomePageState extends State<HomePage> {
                         final packageName = visible[index];
                         final risk = _risk(packageName);
                         final protected = risk.protected;
-                        return CheckboxListTile(
-                          value: _selected.contains(packageName),
-                          onChanged: protected || _busy
+                        final selected = _selected.contains(packageName);
+
+                        return ListTile(
+                          dense: true,
+                          visualDensity: const VisualDensity(
+                            horizontal: -2,
+                            vertical: -2,
+                          ),
+                          minVerticalPadding: 3,
+                          leading: Checkbox(
+                            value: selected,
+                            onChanged: protected || _busy
+                                ? null
+                                : (_) => _togglePackage(packageName),
+                          ),
+                          title: Text(
+                            risk.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            packageName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onTap: protected || _busy
                               ? null
-                              : (_) => setState(
-                                    () => _selected.contains(packageName)
-                                        ? _selected.remove(packageName)
-                                        : _selected.add(packageName),
-                                  ),
-                          title: Row(
+                              : () => _togglePackage(packageName),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Expanded(child: Text(risk.name)),
                               if (risk.deGoogleTier == DeGoogleTier.core)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 8),
-                                  child: Text(
-                                    'ANDROID CORE',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.lightBlueAccent,
-                                    ),
-                                  ),
-                                )
+                                _smallTag('CORE', Colors.lightBlueAccent)
                               else if (risk.deGoogleTier ==
                                   DeGoogleTier.manual)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 8),
-                                  child: Text(
-                                    'MANUAL REVIEW',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orangeAccent,
-                                    ),
-                                  ),
+                                _smallTag('MANUAL', Colors.orangeAccent),
+                              const SizedBox(width: 6),
+                              _riskBadge(risk.level),
+                              const SizedBox(width: 2),
+                              Tooltip(
+                                message: risk.note,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(6),
+                                  child: Icon(Icons.info_outline, size: 17),
                                 ),
+                              ),
                             ],
                           ),
-                          subtitle: Text('$packageName\n${risk.note}'),
-                          secondary: _riskBadge(risk.level),
-                          isThreeLine: true,
-                          controlAffinity: ListTileControlAffinity.leading,
                         );
                       },
                     ),
@@ -926,35 +938,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _presetButton(
-    String title,
-    String subtitle,
-    IconData icon,
-    VoidCallback onPressed,
-  ) {
-    return SizedBox(
-      width: 390,
-      child: OutlinedButton(
-        onPressed: _busy ? null : onPressed,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              Icon(icon),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(subtitle, style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
+  Widget _presetChoice({
+    required String keyName,
+    required String title,
+    required int count,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    final selected = _activePreset == keyName;
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        height: 48,
+        child: OutlinedButton.icon(
+          onPressed: _busy ? null : onPressed,
+          icon: Icon(selected ? Icons.check_circle : icon, size: 19),
+          label: Text('$title ($count)'),
+          style: OutlinedButton.styleFrom(
+            backgroundColor:
+                selected ? scheme.primaryContainer.withValues(alpha: 0.55) : null,
+            side: BorderSide(
+              color: selected ? scheme.primary : scheme.outline,
+            ),
           ),
         ),
       ),
@@ -963,25 +970,24 @@ class _HomePageState extends State<HomePage> {
 
   Widget _restoreView() {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Restore',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Restore packages using install-existing when supported, with local APK backups as fallback for older/newer Android builds.',
-          ),
-          const SizedBox(height: 16),
+          const Text('Restore previously backed-up packages.'),
+          const SizedBox(height: 10),
           Expanded(
             child: _backupPackages.isEmpty
                 ? const Center(
                     child: Text('No local package backups found for this device.'),
                   )
                 : Card(
+                    margin: EdgeInsets.zero,
                     child: ListView.separated(
                       itemCount: _backupPackages.length,
                       separatorBuilder: (context, index) =>
@@ -989,6 +995,7 @@ class _HomePageState extends State<HomePage> {
                       itemBuilder: (context, index) {
                         final packageName = _backupPackages[index];
                         return ListTile(
+                          dense: true,
                           title: Text(_risk(packageName).name),
                           subtitle: Text(packageName),
                           trailing: FilledButton.tonal(
@@ -1006,13 +1013,31 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _smallTag(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
   Widget _riskBadge(RiskLevel level) {
     final label = switch (level) {
       RiskLevel.low => 'LOW',
-      RiskLevel.medium => 'MEDIUM',
+      RiskLevel.medium => 'MED',
       RiskLevel.high => 'HIGH',
-      RiskLevel.critical => 'CRITICAL',
-      RiskLevel.protected => 'PROTECTED',
+      RiskLevel.critical => 'CRIT',
+      RiskLevel.protected => 'LOCKED',
     };
     final color = switch (level) {
       RiskLevel.low => Colors.greenAccent,
@@ -1022,16 +1047,16 @@ class _HomePageState extends State<HomePage> {
       RiskLevel.protected => Colors.blueGrey,
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         border: Border.all(color: color),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Text(
         label,
         style: TextStyle(
           color: color,
-          fontSize: 11,
+          fontSize: 9,
           fontWeight: FontWeight.bold,
         ),
       ),
