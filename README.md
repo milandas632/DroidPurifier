@@ -1,136 +1,152 @@
 # Droid Purifier
 
-Droid Purifier is a Flutter desktop tool for **De-Googling and debloating Android phones over ADB without root**. It focuses on direct multi-select package removal while protecting Android components that must remain for the operating system to function.
+Droid Purifier is an offline-first Flutter desktop assistant for **De-Googling and debloating Android phones over ADB without root**. It is intentionally conservative: the app does not guess that an unknown system package is safe.
 
-> Removing system packages always carries risk and OEM builds differ. Droid Purifier is intentionally conservative: unknown Google/system packages are never auto-selected, Android core/Mainline modules are protected, and every removal batch is reviewed before execution.
+> Removing system packages can always carry device-specific risk. Droid Purifier combines a curated package knowledge list with a live scan of the connected phone and defaults unknown packages to **Unknown / Review** rather than “safe”.
 
-## Version 1.2 highlights
+## Version 1.3 highlights
 
-- **Recommended De-Google** — selects ordinary Google apps and curated non-core Google services while keeping Google Play services, Google Services Framework, and Play Store.
-- **Full De-Google** — additionally selects Play services, GSF, Play Store, Google account/sync/backup/Assistant-style services and other curated Google integrations.
-- **Android core stays protected even in Full De-Google.** A package using a `com.google.*` name is not automatically considered bloatware.
-- Detects Android version and API level.
-- Detects APEX/Mainline packages on modern Android and locks them automatically.
-- Protects Android 10 Google-build core packages such as Permission Controller, DocumentsUI, ExtServices and Module Metadata.
-- Protects modern Mainline aliases such as Android permission, networking, Conscrypt, DNS Resolver, ART/runtime and other platform modules.
-- Protects Google Android resource overlays (`com.google.android.overlay.*`).
-- Protects Android System WebView by default because a working WebView provider may be required by many apps.
-- Unknown future `com.google.*` packages fail safe as **Manual Review** instead of being automatically selected.
-- Setup Wizard is protected while Android initial provisioning is incomplete.
-- Role-sensitive apps such as keyboard, dialer, SMS, camera, launcher, TalkBack and some carrier/enterprise components are **Manual Review** and are not auto-selected.
-- **Select safe shown** replaces unrestricted Select Visible.
-- High/Critical removals require typing `CONFIRM`.
-- Optional APK + split-APK backup before each removal.
-- Restore tries multiple Android-compatible methods, then falls back to the saved APK files.
+- Clean three-part interface: **De-Google / Apps / Restore**.
+- Large compact package list with two-line rows and explanations in tooltips.
+- Four user-facing classifications only:
+  - **Known Removable** — explicitly recognised and appropriate for bulk selection.
+  - **Feature Dependent** — Android should remain functional, but a specific feature/app can stop working.
+  - **Unknown** — Droid Purifier cannot verify the package; never bulk-selected.
+  - **Protected** — Android/OEM infrastructure or a critical role on this specific device.
+- **Recommended De-Google** selects only curated Google apps that are Known Removable.
+- **Full De-Google** additionally selects curated Google service/framework packages such as Play Services, GSF and Play Store, while dynamically protected Android core stays locked.
+- Presets replace the previous selection rather than accumulating selections.
+- **Analyze Phone** performs a dry-run safety scan without removing anything.
+- **Export report** saves a local JSON device/package analysis for troubleshooting or GitHub issue reports.
+- **Expert Mode** is hidden behind an explicit warning and allows advanced users to manually select protected packages.
+- Every removal gets a final safety re-scan immediately before execution.
+- Post-removal **health check** verifies ADB, System UI, Settings, launcher, keyboard and WebView availability.
+- Every removal batch is stored as a **session**, making whole-session rollback available from Restore.
+- Individual APK/split-APK backups are still supported.
+- No telemetry and no runtime network calls; analysis is performed locally through bundled ADB.
 
-## What “Full De-Google” means
+## Dynamic device safety scan
 
-Full De-Google aims to remove Google applications and Google service infrastructure that can be removed for Android user 0 without deliberately removing Android platform components.
+Droid Purifier does not rely only on package names. On connection it probes the current phone and, where supported by that Android version/vendor shell, detects:
 
-It may select packages such as:
+- Android version and API level
+- system vs user packages
+- APEX/Mainline packages
+- runtime resource overlays through Android's overlay manager
+- current launcher
+- current keyboard/IME
+- current dialer
+- current SMS app
+- enabled accessibility services
+- current/default browser
+- current WebView provider
+- device provisioning/setup state
 
-- Google Play services
+Dynamic facts override static rules. For example, a keyboard package can be Feature Dependent on one phone but **Protected** on another phone when it is the active keyboard.
+
+Unsupported commands on old/vendor Android builds fail conservatively; they do not cause unknown packages to become Known Removable.
+
+## De-Google behavior
+
+### Recommended De-Google
+
+Recommended De-Google is the conservative preset. It selects only explicitly curated Google consumer apps that Droid Purifier currently classifies as Known Removable on the connected phone.
+
+It deliberately does not automatically remove unknown Google packages, current role apps, Android Mainline/core components, overlays, or WebView.
+
+### Full De-Google
+
+Full De-Google additionally includes curated Google framework and feature packages such as:
+
+- Google Play Services
 - Google Services Framework
 - Google Play Store
 - Google app / Assistant
-- Google account/sync/backup/restore components
+- Google backup/restore and sync components
 - Google Location History
 - Android Auto
 - Digital Wellbeing
-- Google TTS
-- Gmail, YouTube, Maps, Photos, Drive, Calendar, Contacts and other Google apps
+- Google Text-to-Speech
+- other curated Google integrations
 
-Removing Google Play services/GSF can make third-party apps that rely on Google APIs, FCM push notifications, Play Integrity, Google location APIs, or other Google services stop working. That is separate from protecting Android itself.
+Removing these can break third-party apps or features that depend on Google APIs, FCM, Play Integrity, Google account services, TTS, Android Auto, etc. Droid Purifier shows those consequences before removal.
 
-### Google-namespaced packages that should remain
+Role-sensitive apps such as a current launcher, keyboard, dialer, SMS app, accessibility service or WebView provider are dynamically protected. Users should install/select a replacement before attempting to remove them.
 
-Some stock Android builds use Google package names for Android platform components. Droid Purifier identifies these as **ANDROID CORE** and disables their checkboxes. Examples include:
+## Why some `com.google.*` packages remain
 
-- `com.google.android.permissioncontroller`
-- `com.google.android.permission`
-- `com.google.android.documentsui`
-- `com.google.android.ext.services`
-- `com.google.android.ext.shared`
-- `com.google.android.modulemetadata`
-- `com.google.android.networkstack`
-- `com.google.android.captiveportallogin`
-- `com.google.android.webview`
-- `com.google.android.conscrypt`
-- `com.google.android.resolv`
-- Android Mainline/APEX modules detected dynamically
-- Google Android runtime-resource overlays
+A Google package namespace does not always mean a Google consumer app or tracking service. Google-certified Android builds can use Google-namespaced implementations of real Android platform modules.
 
-Keeping these does not mean the app failed to remove a normal Google application; many are implementations of Android platform functionality.
+Examples include Permission Controller, DocumentsUI, ExtServices, networking modules, WebView and modern Mainline/APEX modules. Droid Purifier protects these rather than trying to achieve “zero package names containing Google” at the cost of breaking Android.
 
-## Android version compatibility
+## Manual Apps mode
 
-Droid Purifier is designed around ADB package-manager commands available on **Android 5.1+**, while adding special handling for the modular/Mainline/APEX architecture introduced on newer Android versions.
+The Apps tab exposes all installed packages.
 
-Compatibility strategy:
+Normal mode:
 
-- **Older Android:** recognizes legacy packages such as Google Account Manager (`com.google.android.gsf.login`), Google Backup Transport, One-Time Initializer, Partner Setup, legacy Play Music and other older Google packages.
-- **Android 10:** explicitly protects the Google-build Permission Controller, DocumentsUI, ExtServices, Module Metadata and related overlays.
-- **Android 11 and later:** protects newer Mainline package aliases and detects APEX modules dynamically when supported by the device shell.
-- **Future Android releases:** unknown Google packages are never automatically removed, and packages detected as APEX are always protected.
+- Known Removable packages can be selected normally.
+- Feature Dependent and Unknown packages can be selected manually and receive stronger review warnings.
+- Protected packages cannot be selected.
 
-OEM firmware can rename, add or remove packages, so no static package database can safely promise identical behavior on every device. The conservative unknown-package policy is intentional.
+Expert Mode:
 
-## Multi-select workflow
+- Requires typing `EXPERT` to enable.
+- Allows manual selection of Protected packages.
+- Protected removals require a stronger `FORCE` confirmation before execution.
 
-1. Connect an Android phone with USB debugging enabled.
-2. Choose **Recommended De-Google**, **Full De-Google**, or another curated preset.
-3. Review the selected packages.
-4. Manually review any packages marked **MANUAL REVIEW** if you want to go further.
-5. Keep **Back up APK files first** enabled when possible.
-6. Confirm the batch and remove the selected packages.
+Presets never use Expert Mode and never auto-select Unknown or Protected packages.
 
-Presets select packages only; they never execute removals immediately.
+## Safety and rollback
 
-## How removal works
+Before a batch runs, Droid Purifier re-scans the device so a package that has become the active launcher/IME/provider can be blocked at the last moment.
 
-Droid Purifier uses a per-user uninstall:
-
-`adb shell pm uninstall -k --user 0 <package>`
-
-This normally removes/disables the preinstalled package for Android user 0 rather than erasing the APK from a read-only system partition. A factory reset or firmware reinstallation can therefore bring preinstalled packages back.
-
-Before removal, Droid Purifier can run:
-
-`adb shell pm path <package>`
-
-and pull the base APK plus split APKs to:
+Backups are stored under:
 
 `DroidPurifier/Backups/<device-id>/<package>/`
 
-For restoration it first tries `cmd package install-existing`, then `pm install-existing`, then falls back to the local APK backup.
+Removal history is stored under:
 
-## Windows build
+`DroidPurifier/Sessions/<device-id>/`
 
-1. Install Flutter with Windows desktop support.
-2. Clone this repository.
-3. Run:
+Reports are exported under:
 
-   `powershell -ExecutionPolicy Bypass -File scripts/bootstrap_windows.ps1`
+`DroidPurifier/Reports/`
 
-4. Start with:
+Backup is recovery assistance, not a guarantee: if a device cannot boot far enough to expose ADB, a desktop ADB tool may not be able to restore packages automatically.
 
-   `flutter run -d windows`
+## Removal method
 
-Release builds bundle Android Platform Tools, so end users do not need to install ADB separately.
+Droid Purifier uses:
 
-## GitHub Actions
+`adb shell pm uninstall -k --user 0 <package>`
 
-The workflow runs Flutter analysis/tests and creates:
+For many preinstalled system packages this removes the package for Android user 0 instead of deleting the read-only system APK. Restore first tries `cmd package install-existing`, then `pm install-existing`, then a local APK/split-APK backup when available.
 
-- `DroidPurifier-Windows-x64.zip` — portable Windows build with ADB.
-- `DroidPurifier-Setup.exe` — Windows installer with ADB.
-- `DroidPurifier-macOS.zip` — macOS build on manual/tagged runs.
+## Android compatibility strategy
 
-Pushes to `main` automatically validate/build Windows. Tagged releases can attach the artifacts automatically.
+Droid Purifier targets old Android package-manager workflows while adding newer capabilities when the device supports them.
+
+- Legacy Android uses widely available `pm`, `settings`, `dumpsys` and role/default-app fallbacks.
+- Android 10+ additionally receives APEX/Mainline detection when supported.
+- Overlay and role probes are capability-based: unsupported vendor commands are ignored safely.
+- Unknown future Android/OEM packages remain Unknown rather than being guessed removable.
+
+No static list can prove every proprietary OEM dependency on every Android release. Conservative Unknown classification is therefore a deliberate safety feature.
+
+## Build and release
+
+GitHub Actions validates Flutter analysis/tests, builds a real Windows x64 Flutter release, bundles Android Platform Tools, and creates:
+
+- `DroidPurifier-Windows-x64.zip`
+- `DroidPurifier-Setup.exe`
+- `DroidPurifier-macOS.zip` on manual/tagged macOS runs
+
+The generated Windows runner opens with a larger workspace so the package list remains the main focus of the interface.
 
 ## Project origin
 
-Droid Purifier is an independent implementation inspired by workflow/safety ideas from the MIT-licensed [System Purifier](https://github.com/orailnoor/sys-purifier) project. Droid Purifier's multi-select UI, De-Google policy, preset model and source code in this repository are independently implemented.
+Droid Purifier is an independent implementation inspired by workflow/safety ideas from the MIT-licensed [System Purifier](https://github.com/orailnoor/sys-purifier) project. Droid Purifier's UI, dynamic safety scanner, package policy, presets and rollback workflow are independently implemented.
 
 ## License
 
