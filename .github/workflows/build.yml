@@ -1,0 +1,172 @@
+name: Build desktop releases
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable and generate Windows runner
+        shell: pwsh
+        run: |
+          flutter config --enable-windows-desktop
+          flutter create --platforms=windows --project-name droid_purifier .
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Download Android platform-tools
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "platform-tools.zip"
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath tools -Force
+          if (-not (Test-Path "tools\platform-tools\adb.exe")) {
+            throw "adb.exe was not found after extracting Android platform-tools."
+          }
+
+      - name: Build Flutter Windows release
+        run: flutter build windows --release
+
+      - name: Bundle ADB with the application
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "build\windows" -Filter "droid_purifier.exe" -File -Recurse | Select-Object -First 1
+          if ($null -eq $exe) { throw "droid_purifier.exe was not found in the Flutter build output." }
+          $releaseDir = $exe.Directory.FullName
+          Copy-Item -Recurse -Force "tools\platform-tools" (Join-Path $releaseDir "platform-tools")
+          "DROID_PURIFIER_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Release directory: $releaseDir"
+
+      - name: Create portable Windows ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "$env:DROID_PURIFIER_RELEASE_DIR\*" -DestinationPath "DroidPurifier-Windows-x64.zip" -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler was not found." }
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DBuildDir=$env:DROID_PURIFIER_RELEASE_DIR" "installer\DroidPurifier.iss"
+          if (-not (Test-Path "installer\DroidPurifier-Setup.exe")) {
+            throw "DroidPurifier-Setup.exe was not created."
+          }
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DroidPurifier-Windows-x64
+          if-no-files-found: error
+          path: |
+            DroidPurifier-Windows-x64.zip
+            installer/DroidPurifier-Setup.exe
+
+      - name: Attach Windows files to tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DroidPurifier-Windows-x64.zip
+            installer/DroidPurifier-Setup.exe
+
+  macos:
+    name: macOS
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable and generate macOS runner
+        run: |
+          flutter config --enable-macos-desktop
+          flutter create --platforms=macos --project-name droid_purifier .
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Download Android platform-tools
+        run: |
+          mkdir -p tools
+          curl -fL "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip" -o /tmp/platform-tools.zip
+          unzip -q /tmp/platform-tools.zip -d tools
+          chmod +x tools/platform-tools/adb
+
+      - name: Build Flutter macOS release
+        run: flutter build macos --release
+
+      - name: Bundle ADB in app Resources
+        run: |
+          APP=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          mkdir -p "$APP/Contents/Resources/platform-tools"
+          cp -R tools/platform-tools/* "$APP/Contents/Resources/platform-tools/"
+          chmod +x "$APP/Contents/Resources/platform-tools/adb"
+          echo "DROID_PURIFIER_APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Create macOS ZIP
+        run: ditto -c -k --sequesterRsrc --keepParent "$DROID_PURIFIER_APP" DroidPurifier-macOS.zip
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DroidPurifier-macOS
+          if-no-files-found: error
+          path: DroidPurifier-macOS.zip
+
+      - name: Attach macOS file to tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DroidPurifier-macOS.zip
