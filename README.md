@@ -3,6 +3,9 @@
 Droid Purifier is an offline-first Flutter desktop assistant for **De-Googling and debloating Android phones over ADB without root**. It is intentionally conservative: the app does not guess that an unknown system package is safe.
 
 > Removing system packages can always carry device-specific risk. Droid Purifier combines a curated package knowledge list with a live scan of the connected phone and defaults unknown packages to **Unknown / Review** rather than “safe”.
+>
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/83a35b68-f17a-4c33-ae6e-8d6d312464bb" />
+
 
 ## Version 1.3 highlights
 
