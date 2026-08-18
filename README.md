@@ -11,7 +11,14 @@ Droid Purifier is an offline-first Flutter desktop assistant for **De-Googling a
 Website: https://techydruid.com/  
 YouTube: https://www.youtube.com/@TechyDruid
 
-## Version 1.3 highlights
+## Download
+
+**[Download the latest version of Droid Purifier](https://github.com/techydruid/DroidPurifier/releases/latest)**
+
+For most Windows users, download **DroidPurifier-Setup.exe**.  
+A portable ZIP version is also available on the release page.
+
+## Version 1.3.0 highlights
 
 - Clean three-part interface: **De-Google / Apps / Restore**.
 - Large compact package list with two-line rows and explanations in tooltips.
