@@ -39,7 +39,10 @@ jobs:
           flutter create --platforms=windows --project-name droid_purifier .
           $mainCpp = "windows\runner\main.cpp"
           if (Test-Path $mainCpp) {
-            (Get-Content $mainCpp -Raw).Replace('L"droid_purifier"', 'L"Droid Purifier"') | Set-Content $mainCpp -Encoding utf8
+            $source = Get-Content $mainCpp -Raw
+            $source = $source.Replace('L"droid_purifier"', 'L"Droid Purifier"')
+            $source = $source.Replace('Win32Window::Size size(1280, 720);', 'Win32Window::Size size(1400, 860);')
+            Set-Content $mainCpp -Value $source -Encoding utf8
           }
 
       - name: Resolve dependencies
