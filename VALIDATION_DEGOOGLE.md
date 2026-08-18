@@ -1,0 +1,1 @@
+Temporary validation marker for the Droid Purifier 1.2.0 De-Google safety build. This branch exists only to trigger pull-request CI and is not intended to be merged.
