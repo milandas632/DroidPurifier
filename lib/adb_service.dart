@@ -29,11 +29,50 @@ class DeviceInfo {
 class PackageInventory {
   const PackageInventory({
     required this.packages,
+    required this.systemPackages,
     required this.apexPackages,
   });
 
   final List<String> packages;
+  final Set<String> systemPackages;
   final Set<String> apexPackages;
+}
+
+class SafetySnapshot {
+  const SafetySnapshot({
+    required this.overlayPackages,
+    required this.criticalRolePackages,
+    required this.enabledAccessibilityPackages,
+    required this.currentLauncher,
+    required this.currentIme,
+    required this.currentDialer,
+    required this.currentSms,
+    required this.currentBrowser,
+    required this.currentWebView,
+  });
+
+  final Set<String> overlayPackages;
+  final Set<String> criticalRolePackages;
+  final Set<String> enabledAccessibilityPackages;
+  final String? currentLauncher;
+  final String? currentIme;
+  final String? currentDialer;
+  final String? currentSms;
+  final String? currentBrowser;
+  final String? currentWebView;
+}
+
+class HealthCheckItem {
+  const HealthCheckItem(this.label, this.ok, this.detail);
+  final String label;
+  final bool ok;
+  final String detail;
+}
+
+class HealthReport {
+  const HealthReport(this.items);
+  final List<HealthCheckItem> items;
+  bool get passed => items.every((item) => item.ok);
 }
 
 class AdbException implements Exception {
@@ -112,8 +151,13 @@ class AdbService {
       run(['-s', deviceId, 'shell', ...command], timeout: timeout);
 
   Future<String> _shellText(String deviceId, List<String> command) async {
-    final result = await _shell(deviceId, command);
-    return result.stdout.toString().trim();
+    try {
+      final result = await _shell(deviceId, command);
+      if (result.exitCode != 0) return '';
+      return result.stdout.toString().trim();
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<List<DeviceInfo>> devices() async {
@@ -157,16 +201,16 @@ class AdbService {
     final sdkInt = int.tryParse(sdkText.trim());
 
     final batteryDump = await _shellText(id, ['dumpsys', 'battery']);
-    final level = RegExp(r'level:\s*(\d+)')
-        .firstMatch(batteryDump)
-        ?.group(1);
+    final level = RegExp(r'level:\s*(\d+)').firstMatch(batteryDump)?.group(1);
 
-    // user_setup_complete exists across a wide range of Android releases.
-    // device_provisioned is used as an additional fallback for older builds.
-    final userSetup =
-        await _shellText(id, ['settings', 'get', 'secure', 'user_setup_complete']);
-    final provisioned =
-        await _shellText(id, ['settings', 'get', 'global', 'device_provisioned']);
+    final userSetup = await _shellText(
+      id,
+      ['settings', 'get', 'secure', 'user_setup_complete'],
+    );
+    final provisioned = await _shellText(
+      id,
+      ['settings', 'get', 'global', 'device_provisioned'],
+    );
     final explicitlyIncomplete = userSetup == '0' || provisioned == '0';
     final explicitlyComplete = userSetup == '1' || provisioned == '1';
     final setupComplete = explicitlyComplete || !explicitlyIncomplete;
@@ -188,7 +232,6 @@ class AdbService {
         .split(RegExp(r'\r?\n'))
         .where((line) => line.startsWith('package:'))
         .map((line) {
-          // pm can return package:name or package:path=name depending on flags.
           final value = line.substring(8).trim();
           final equals = value.lastIndexOf('=');
           return equals >= 0 ? value.substring(equals + 1).trim() : value;
@@ -204,16 +247,23 @@ class AdbService {
     String deviceId, {
     int? sdkInt,
   }) async {
-    final result = await _shell(deviceId, ['pm', 'list', 'packages']);
-    if (result.exitCode != 0) {
-      throw AdbException(result.stderr.toString().trim());
+    final all = await _shell(deviceId, ['pm', 'list', 'packages']);
+    if (all.exitCode != 0) {
+      throw AdbException(all.stderr.toString().trim());
     }
-    final packages = _parsePackageList(result.stdout.toString());
+    final packages = _parsePackageList(all.stdout.toString());
+
+    final systemPackages = <String>{};
+    try {
+      final system = await _shell(deviceId, ['pm', 'list', 'packages', '-s']);
+      if (system.exitCode == 0) {
+        systemPackages.addAll(_parsePackageList(system.stdout.toString()));
+      }
+    } catch (_) {
+      // Old/vendor builds can omit flags. Unknown packages will fail safe.
+    }
 
     final apexPackages = <String>{};
-    // APEX/Mainline appeared in Android 10 (API 29). --apex-only does not
-    // exist on older versions, so only probe where it can be useful and treat
-    // unsupported-command failures as an empty set.
     if (sdkInt == null || sdkInt >= 29) {
       try {
         final apex = await _shell(
@@ -224,12 +274,210 @@ class AdbService {
           apexPackages.addAll(_parsePackageList(apex.stdout.toString()));
         }
       } catch (_) {
-        // Fail safe: the static Mainline aliases in package_policy.dart still
-        // protect known modules if a vendor shell does not expose this flag.
+        // Static Mainline aliases remain protected as a fallback.
       }
     }
 
-    return PackageInventory(packages: packages, apexPackages: apexPackages);
+    return PackageInventory(
+      packages: packages,
+      systemPackages: systemPackages,
+      apexPackages: apexPackages,
+    );
+  }
+
+  String? _componentPackage(String text, Set<String> installed) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || trimmed == 'null') return null;
+
+    for (final line in trimmed.split(RegExp(r'\r?\n')).reversed) {
+      final value = line.trim();
+      if (value.isEmpty) continue;
+      final slash = value.indexOf('/');
+      if (slash > 0) {
+        final packageName = value.substring(0, slash).trim();
+        if (installed.contains(packageName)) return packageName;
+      }
+      if (installed.contains(value)) return value;
+    }
+    return null;
+  }
+
+  Future<String?> _resolveActivityPackage(
+    String deviceId,
+    Set<String> installed,
+    List<String> args,
+  ) async {
+    var text = await _shellText(deviceId, ['cmd', 'package', 'resolve-activity', '--brief', ...args]);
+    var found = _componentPackage(text, installed);
+    if (found != null) return found;
+
+    text = await _shellText(deviceId, ['pm', 'resolve-activity', '--brief', ...args]);
+    found = _componentPackage(text, installed);
+    return found;
+  }
+
+  Set<String> _packagesFromText(String text, Set<String> installed) {
+    final result = <String>{};
+    final regex = RegExp(r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+');
+    for (final match in regex.allMatches(text)) {
+      final value = match.group(0);
+      if (value != null && installed.contains(value)) result.add(value);
+    }
+    return result;
+  }
+
+  Future<SafetySnapshot> safetySnapshot(
+    DeviceInfo device,
+    PackageInventory inventory,
+  ) async {
+    final installed = inventory.packages.toSet();
+
+    final overlayPackages = <String>{};
+    final overlayText = await _shellText(device.id, ['cmd', 'overlay', 'list']);
+    if (overlayText.isNotEmpty) {
+      overlayPackages.addAll(_packagesFromText(overlayText, installed));
+    }
+
+    final currentLauncher = await _resolveActivityPackage(
+      device.id,
+      installed,
+      ['-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.HOME'],
+    );
+
+    final imeText = await _shellText(
+      device.id,
+      ['settings', 'get', 'secure', 'default_input_method'],
+    );
+    final currentIme = _componentPackage(imeText, installed);
+
+    String? currentDialer;
+    if ((device.sdkInt ?? 0) >= 29) {
+      final dialerText = await _shellText(
+        device.id,
+        ['cmd', 'role', 'get-role-holders', 'android.app.role.DIALER'],
+      );
+      currentDialer = _componentPackage(dialerText, installed);
+    }
+    currentDialer ??= _componentPackage(
+      await _shellText(device.id, ['telecom', 'get-default-dialer']),
+      installed,
+    );
+
+    String? currentSms;
+    if ((device.sdkInt ?? 0) >= 29) {
+      currentSms = _componentPackage(
+        await _shellText(
+          device.id,
+          ['cmd', 'role', 'get-role-holders', 'android.app.role.SMS'],
+        ),
+        installed,
+      );
+    }
+    currentSms ??= _componentPackage(
+      await _shellText(
+        device.id,
+        ['settings', 'get', 'secure', 'sms_default_application'],
+      ),
+      installed,
+    );
+
+    final currentBrowser = await _resolveActivityPackage(
+      device.id,
+      installed,
+      ['-a', 'android.intent.action.VIEW', '-d', 'https://example.com'],
+    );
+
+    String? currentWebView;
+    final webviewDump = await _shellText(device.id, ['dumpsys', 'webviewupdate']);
+    if (webviewDump.isNotEmpty) {
+      final candidates = _packagesFromText(webviewDump, installed);
+      for (final packageName in candidates) {
+        final lower = packageName.toLowerCase();
+        if (lower.contains('webview')) {
+          currentWebView = packageName;
+          break;
+        }
+      }
+    }
+
+    final enabledAccessibilityPackages = <String>{};
+    final accessibility = await _shellText(
+      device.id,
+      ['settings', 'get', 'secure', 'enabled_accessibility_services'],
+    );
+    if (accessibility.isNotEmpty && accessibility != 'null') {
+      enabledAccessibilityPackages.addAll(
+        _packagesFromText(accessibility, installed),
+      );
+    }
+
+    final criticalRolePackages = <String>{
+      if (currentLauncher != null) currentLauncher,
+      if (currentIme != null) currentIme,
+      if (currentDialer != null) currentDialer,
+      if (currentSms != null) currentSms,
+      ...enabledAccessibilityPackages,
+    };
+
+    return SafetySnapshot(
+      overlayPackages: overlayPackages,
+      criticalRolePackages: criticalRolePackages,
+      enabledAccessibilityPackages: enabledAccessibilityPackages,
+      currentLauncher: currentLauncher,
+      currentIme: currentIme,
+      currentDialer: currentDialer,
+      currentSms: currentSms,
+      currentBrowser: currentBrowser,
+      currentWebView: currentWebView,
+    );
+  }
+
+  Future<HealthReport> healthCheck(DeviceInfo device) async {
+    final items = <HealthCheckItem>[];
+
+    try {
+      final echo = await _shell(device.id, ['echo', 'DROID_PURIFIER_OK']);
+      items.add(HealthCheckItem(
+        'ADB connection',
+        echo.exitCode == 0 && echo.stdout.toString().contains('DROID_PURIFIER_OK'),
+        'Device responds to ADB.',
+      ));
+    } catch (_) {
+      items.add(const HealthCheckItem('ADB connection', false, 'Device did not respond to ADB.'));
+      return HealthReport(items);
+    }
+
+    final inventory = await packageInventory(device.id, sdkInt: device.sdkInt);
+    final installed = inventory.packages.toSet();
+    for (final entry in const {
+      'Android System UI': 'com.android.systemui',
+      'Android Settings': 'com.android.settings',
+    }.entries) {
+      items.add(HealthCheckItem(
+        entry.key,
+        installed.contains(entry.value),
+        installed.contains(entry.value) ? 'Present.' : 'Package is missing for user 0.',
+      ));
+    }
+
+    final snapshot = await safetySnapshot(device, inventory);
+    items.add(HealthCheckItem(
+      'Launcher',
+      snapshot.currentLauncher != null,
+      snapshot.currentLauncher ?? 'No default launcher resolved.',
+    ));
+    items.add(HealthCheckItem(
+      'Keyboard',
+      snapshot.currentIme != null,
+      snapshot.currentIme ?? 'No default keyboard resolved.',
+    ));
+    items.add(HealthCheckItem(
+      'WebView provider',
+      snapshot.currentWebView != null || (device.sdkInt ?? 0) < 21,
+      snapshot.currentWebView ?? 'No active WebView provider resolved.',
+    ));
+
+    return HealthReport(items);
   }
 
   Future<void> backup(
@@ -238,8 +486,7 @@ class AdbService {
     Directory output, {
     int? sdkInt,
   }) async {
-    final pathResult =
-        await _shell(deviceId, ['pm', 'path', packageName]);
+    final pathResult = await _shell(deviceId, ['pm', 'path', packageName]);
     if (pathResult.exitCode != 0) {
       throw AdbException('Could not locate APK files for $packageName.');
     }
@@ -302,7 +549,6 @@ class AdbService {
     String packageName,
     Directory backupDir,
   ) async {
-    // Modern Android path.
     try {
       final existing = await _shell(
         deviceId,
@@ -313,11 +559,8 @@ class AdbService {
           (text.contains('installed') || text.contains('success'))) {
         return null;
       }
-    } catch (_) {
-      // Continue to legacy/fallback methods.
-    }
+    } catch (_) {}
 
-    // Some releases expose install-existing directly through pm.
     try {
       final legacy = await _shell(
         deviceId,
@@ -328,9 +571,7 @@ class AdbService {
           (text.contains('installed') || text.contains('success'))) {
         return null;
       }
-    } catch (_) {
-      // Continue to the local APK backup.
-    }
+    } catch (_) {}
 
     if (!await backupDir.exists()) return 'No APK backup is available.';
     final apks = await backupDir
