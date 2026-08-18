@@ -1,0 +1,16 @@
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+windows/
+macos/
+linux/
+tools/platform-tools/
