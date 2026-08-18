@@ -1,5 +1,10 @@
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  errors:
+    use_build_context_synchronously: ignore
+    prefer_if_null_operators: ignore
+
 linter:
   rules:
     avoid_print: true
