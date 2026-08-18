@@ -1,1033 +1,364 @@
-enum RiskLevel { low, medium, high, critical, protected }
+enum SafetyClass { knownRemovable, featureDependent, unknown, protected }
 
-enum DeGoogleTier {
-  none,
-  recommended,
-  full,
-  manual,
-  core,
-}
+enum DeGoogleTier { none, recommended, full, manual, core }
 
-class RiskInfo {
-  const RiskInfo(
+class PackageInfo {
+  const PackageInfo(
     this.name,
-    this.level,
+    this.safety,
     this.note, {
     this.deGoogleTier = DeGoogleTier.none,
     this.autoSelect = false,
   });
 
   final String name;
-  final RiskLevel level;
+  final SafetyClass safety;
   final String note;
   final DeGoogleTier deGoogleTier;
   final bool autoSelect;
 
-  bool get protected => level == RiskLevel.protected;
+  bool get protected => safety == SafetyClass.protected;
   bool get googleRemovalCandidate =>
       deGoogleTier == DeGoogleTier.recommended ||
       deGoogleTier == DeGoogleTier.full ||
       deGoogleTier == DeGoogleTier.manual;
 }
 
-/// Conservative package policy for stock Android builds from legacy Android
-/// versions through modern Mainline/APEX based releases.
+/// Package policy deliberately fails safe.
 ///
-/// Design rule: if a Google-namespaced package is unknown, Droid Purifier does
-/// not auto-select it. This makes new Android releases fail safe instead of
-/// assuming every future com.google.* package is bloatware.
-class RiskDatabase {
-  static const Map<String, RiskInfo> exact = {
-    // Core Android packages.
-    'com.android.systemui': RiskInfo(
-      'Android System UI',
-      RiskLevel.protected,
-      'Required for the Android interface.',
+/// A package is NEVER called "Known removable" merely because Droid Purifier
+/// does not recognise it. Dynamic device facts (APEX, overlay, current role,
+/// WebView provider, etc.) override this curated list and can protect a package
+/// on one phone even when it is removable on another.
+class PackagePolicy {
+  static const Map<String, PackageInfo> exact = {
+    // Android framework / platform essentials.
+    'android': PackageInfo(
+      'Android Framework',
+      SafetyClass.protected,
+      'Core Android framework resources. Never remove.',
     ),
-    'com.android.settings': RiskInfo(
+    'com.android.systemui': PackageInfo(
+      'Android System UI',
+      SafetyClass.protected,
+      'Required for the status bar, navigation and system interface.',
+    ),
+    'com.android.settings': PackageInfo(
       'Android Settings',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Required to manage the device.',
     ),
-    'com.android.phone': RiskInfo(
-      'Phone Services',
-      RiskLevel.protected,
+    'com.android.phone': PackageInfo(
+      'Android Phone Services',
+      SafetyClass.protected,
       'Core telephony service.',
     ),
-    'com.android.providers.settings': RiskInfo(
+    'com.android.providers.settings': PackageInfo(
       'Settings Provider',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Core Android settings storage.',
     ),
-    'com.android.packageinstaller': RiskInfo(
+    'com.android.packageinstaller': PackageInfo(
       'Android Package Installer',
-      RiskLevel.protected,
-      'Required to install and manage apps on older Android versions.',
+      SafetyClass.protected,
+      'Required to install and manage applications.',
     ),
-    'com.google.android.packageinstaller': RiskInfo(
+    'com.google.android.packageinstaller': PackageInfo(
       'Android Package Installer (Google build)',
-      RiskLevel.protected,
-      'Android system package installer; keep it even when De-Googling.',
+      SafetyClass.protected,
+      'Android package-management component, not Google bloatware.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.permissioncontroller': RiskInfo(
+    'com.android.permissioncontroller': PackageInfo(
       'Android Permission Controller',
-      RiskLevel.protected,
-      'Manages runtime permissions and Android roles.',
+      SafetyClass.protected,
+      'Manages Android runtime permissions and roles.',
     ),
-    'com.google.android.permissioncontroller': RiskInfo(
+    'com.google.android.permissioncontroller': PackageInfo(
       'Android Permission Controller (Google build)',
-      RiskLevel.protected,
-      'Android 10 permission system. This is Android core, not a removable Google app.',
+      SafetyClass.protected,
+      'Android permission infrastructure. Keep it when De-Googling.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.google.android.permission': RiskInfo(
+    'com.google.android.permission': PackageInfo(
       'Android Permission Mainline module',
-      RiskLevel.protected,
-      'Modern Android permission framework/Mainline module.',
+      SafetyClass.protected,
+      'Modern Android permission framework module.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.documentsui': RiskInfo(
+    'com.android.documentsui': PackageInfo(
       'Android DocumentsUI',
-      RiskLevel.protected,
-      'Provides Android system file/document picker functionality.',
+      SafetyClass.protected,
+      'Android system file/document picker.',
     ),
-    'com.google.android.documentsui': RiskInfo(
+    'com.google.android.documentsui': PackageInfo(
       'Android DocumentsUI (Google build)',
-      RiskLevel.protected,
-      'Android system file/document picker. Keep it when De-Googling.',
+      SafetyClass.protected,
+      'Android system file/document picker, not a Google consumer app.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.ext.services': RiskInfo(
+    'com.android.ext.services': PackageInfo(
       'Android ExtServices',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Android framework extension services.',
     ),
-    'com.google.android.ext.services': RiskInfo(
+    'com.google.android.ext.services': PackageInfo(
       'Android ExtServices (Google build)',
-      RiskLevel.protected,
-      'Android Mainline/framework service, not a normal Google app.',
+      SafetyClass.protected,
+      'Android framework/Mainline service.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.ext.shared': RiskInfo(
+    'com.android.ext.shared': PackageInfo(
       'Android ExtShared',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Shared Android framework extension library.',
     ),
-    'com.google.android.ext.shared': RiskInfo(
+    'com.google.android.ext.shared': PackageInfo(
       'Android ExtShared (Google build)',
-      RiskLevel.protected,
-      'Shared Android framework library. Keep it when De-Googling.',
+      SafetyClass.protected,
+      'Shared Android framework library.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.modulemetadata': RiskInfo(
+    'com.android.modulemetadata': PackageInfo(
       'Android Module Metadata',
-      RiskLevel.protected,
-      'Tracks Android Mainline module metadata/security state.',
+      SafetyClass.protected,
+      'Tracks Android modular-system metadata.',
     ),
-    'com.google.android.modulemetadata': RiskInfo(
+    'com.google.android.modulemetadata': PackageInfo(
       'Android Module Metadata (Google build)',
-      RiskLevel.protected,
-      'Android Mainline metadata component, not a removable Google app.',
+      SafetyClass.protected,
+      'Android modular-system metadata component.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.networkstack': RiskInfo(
+    'com.android.networkstack': PackageInfo(
       'Android Network Stack',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Core Android networking component.',
     ),
-    'com.google.android.networkstack': RiskInfo(
+    'com.google.android.networkstack': PackageInfo(
       'Android Network Stack (Google build)',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Core Android networking/Mainline component.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.networkstack.permissionconfig': RiskInfo(
+    'com.android.networkstack.permissionconfig': PackageInfo(
       'Network Stack Permission Configuration',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Permission configuration for Android networking.',
     ),
-    'com.google.android.networkstack.permissionconfig': RiskInfo(
+    'com.google.android.networkstack.permissionconfig': PackageInfo(
       'Network Stack Permission Configuration (Google build)',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Android networking permission configuration.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.captiveportallogin': RiskInfo(
+    'com.android.captiveportallogin': PackageInfo(
       'Captive Portal Login',
-      RiskLevel.protected,
+      SafetyClass.protected,
       'Used to sign into Wi-Fi captive portals.',
     ),
-    'com.google.android.captiveportallogin': RiskInfo(
+    'com.google.android.captiveportallogin': PackageInfo(
       'Captive Portal Login (Google build)',
-      RiskLevel.protected,
-      'Android networking component used for Wi-Fi sign-in pages.',
+      SafetyClass.protected,
+      'Android networking component for Wi-Fi sign-in pages.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.google.android.webview': RiskInfo(
+    'com.google.android.webview': PackageInfo(
       'Android System WebView (Google provider)',
-      RiskLevel.protected,
-      'Many apps require a working WebView provider. Replace the provider before attempting to remove it.',
+      SafetyClass.protected,
+      'Many apps need a working WebView provider. Replace it first.',
       deGoogleTier: DeGoogleTier.core,
     ),
-    'com.android.webview': RiskInfo(
+    'com.android.webview': PackageInfo(
       'Android System WebView',
-      RiskLevel.protected,
-      'Many apps require a working WebView provider.',
-    ),
-    'com.google.android.conscrypt': RiskInfo(
-      'Android Conscrypt Mainline module',
-      RiskLevel.protected,
-      'Core TLS/cryptography provider used by Android.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.resolv': RiskInfo(
-      'Android DNS Resolver Mainline module',
-      RiskLevel.protected,
-      'Core Android DNS/networking module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.cellbroadcast': RiskInfo(
-      'Android Cell Broadcast Mainline module',
-      RiskLevel.protected,
-      'System/emergency cell broadcast functionality.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.tzdata2': RiskInfo(
-      'Android Time Zone Data module',
-      RiskLevel.protected,
-      'System time-zone data/Mainline module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.media': RiskInfo(
-      'Android Media Mainline module',
-      RiskLevel.protected,
-      'Core Android media framework module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.media.swcodec': RiskInfo(
-      'Android Media Codec Mainline module',
-      RiskLevel.protected,
-      'Core Android software media codecs.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.mediaprovider': RiskInfo(
-      'Android MediaProvider Mainline module',
-      RiskLevel.protected,
-      'Core Android media storage/provider functionality.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.sdkext': RiskInfo(
-      'Android SDK Extensions Mainline module',
-      RiskLevel.protected,
-      'Android platform SDK extension module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.os.statsd': RiskInfo(
-      'Android statsd Mainline module',
-      RiskLevel.protected,
-      'Android platform statistics infrastructure.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.tethering': RiskInfo(
-      'Android Tethering Mainline module',
-      RiskLevel.protected,
-      'Core hotspot/tethering implementation.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.wifi': RiskInfo(
-      'Android Wi-Fi Mainline module',
-      RiskLevel.protected,
-      'Core Android Wi-Fi implementation.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.ipsec': RiskInfo(
-      'Android IPsec Mainline module',
-      RiskLevel.protected,
-      'Core IPsec/IKE networking implementation.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.neuralnetworks': RiskInfo(
-      'Android NNAPI Mainline module',
-      RiskLevel.protected,
-      'Android neural-networks runtime module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.art': RiskInfo(
-      'Android Runtime Mainline module',
-      RiskLevel.protected,
-      'Android Runtime (ART) module. Never remove.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.runtime': RiskInfo(
-      'Android Runtime module',
-      RiskLevel.protected,
-      'Core Android runtime libraries.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.i18n': RiskInfo(
-      'Android i18n Mainline module',
-      RiskLevel.protected,
-      'Core Android internationalization libraries.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.adbd': RiskInfo(
-      'Android ADB Mainline module',
-      RiskLevel.protected,
-      'Android debugging daemon module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.rkpd': RiskInfo(
-      'Android Remote Key Provisioning module',
-      RiskLevel.protected,
-      'Security/key-provisioning system module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.uwb': RiskInfo(
-      'Android UWB Mainline module',
-      RiskLevel.protected,
-      'Android ultra-wideband platform module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.btservices': RiskInfo(
-      'Android Bluetooth Mainline module',
-      RiskLevel.protected,
-      'Core Android Bluetooth services.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.appsearch': RiskInfo(
-      'Android AppSearch Mainline module',
-      RiskLevel.protected,
-      'Android platform search/indexing module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.configinfrastructure': RiskInfo(
-      'Android Config Infrastructure module',
-      RiskLevel.protected,
-      'Android platform configuration Mainline module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.crashrecovery': RiskInfo(
-      'Android Crash Recovery module',
-      RiskLevel.protected,
-      'Android system crash-recovery infrastructure.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.profiling': RiskInfo(
-      'Android Profiling module',
-      RiskLevel.protected,
-      'Android platform profiling Mainline module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.euicc': RiskInfo(
-      'Android eSIM Manager (Google build)',
-      RiskLevel.protected,
-      'System eSIM management component. Removing it can break eSIM functionality.',
-      deGoogleTier: DeGoogleTier.core,
+      SafetyClass.protected,
+      'Many apps need a working WebView provider.',
     ),
 
-    // Full De-Google infrastructure. Basic Android can run without these, but
-    // Google-dependent third-party apps/features may stop working.
-    'com.google.android.gms': RiskInfo(
-      'Google Play services',
-      RiskLevel.critical,
-      'Full De-Google target. Apps using Google APIs, FCM, location or Play Integrity may stop working.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.gsf': RiskInfo(
-      'Google Services Framework',
-      RiskLevel.critical,
-      'Full De-Google target. Google account/device registration and Google framework features will stop.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.gsf.login': RiskInfo(
-      'Google Account Manager (legacy)',
-      RiskLevel.high,
-      'Legacy Google account sign-in component found on older Android versions.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.android.vending': RiskInfo(
-      'Google Play Store',
-      RiskLevel.high,
-      'Full De-Google target. Install/update apps using another source after removal.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.googlequicksearchbox': RiskInfo(
-      'Google app / Assistant',
-      RiskLevel.medium,
-      'Google Search, Discover and Assistant integrations will stop.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.gms.location.history': RiskInfo(
-      'Google Location History',
-      RiskLevel.low,
-      'Google location-history component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.backuptransport': RiskInfo(
-      'Google Backup Transport (legacy)',
-      RiskLevel.medium,
-      'Legacy Google cloud backup transport.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.restore': RiskInfo(
-      'Google Restore',
-      RiskLevel.medium,
-      'Google cloud/device restore component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.pixelmigrate': RiskInfo(
-      'Google Data Transfer / Pixel Migrate',
-      RiskLevel.medium,
-      'Google device migration component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.turbo': RiskInfo(
-      'Device Health Services',
-      RiskLevel.medium,
-      'Google battery/device health predictions and related intelligence.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.partnersetup': RiskInfo(
-      'Google Partner Setup',
-      RiskLevel.medium,
-      'Google partner/OEM integration setup service.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.onetimeinitializer': RiskInfo(
-      'Google One-Time Initializer',
-      RiskLevel.low,
-      'Legacy Google one-time provisioning component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.syncadapters.contacts': RiskInfo(
-      'Google Contacts Sync',
-      RiskLevel.medium,
-      'Google-account contact synchronization will stop.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.syncadapters.calendar': RiskInfo(
-      'Google Calendar Sync',
-      RiskLevel.medium,
-      'Google-account calendar synchronization will stop.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.projection.gearhead': RiskInfo(
-      'Android Auto',
-      RiskLevel.medium,
-      'Android Auto will stop working.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.printservice.recommendation': RiskInfo(
-      'Google Print Service Recommendation',
-      RiskLevel.low,
-      'Printer discovery/recommendation integration will be removed.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.wellbeing': RiskInfo(
-      'Digital Wellbeing',
-      RiskLevel.medium,
-      'Digital Wellbeing, app timers and related features will stop.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.feedback': RiskInfo(
-      'Google Feedback',
-      RiskLevel.low,
-      'Google feedback/reporting component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.tts': RiskInfo(
-      'Speech Services by Google',
-      RiskLevel.high,
-      'Google text-to-speech will stop. Install another TTS engine first if you rely on spoken output.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
-    'com.google.android.marvin.talkback': RiskInfo(
-      'Android Accessibility Suite / TalkBack',
-      RiskLevel.high,
-      'TalkBack/accessibility services will stop. Do not remove if you depend on them.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: false,
-    ),
-    'com.google.android.setupwizard': RiskInfo(
-      'Google Setup Wizard',
-      RiskLevel.high,
-      'Remove only after Android initial setup has completed.',
-      deGoogleTier: DeGoogleTier.full,
-      autoSelect: true,
-    ),
+    // Modern Android Mainline aliases. Dynamic APEX detection adds another
+    // layer, so future modules remain protected even if absent from this list.
+    'com.google.android.conscrypt': PackageInfo('Android Conscrypt module', SafetyClass.protected, 'Core TLS/cryptography module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.resolv': PackageInfo('Android DNS Resolver module', SafetyClass.protected, 'Core DNS/networking module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.cellbroadcast': PackageInfo('Android Cell Broadcast module', SafetyClass.protected, 'Emergency/system cell broadcast module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.tzdata2': PackageInfo('Android Time Zone Data module', SafetyClass.protected, 'System time-zone data module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.media': PackageInfo('Android Media module', SafetyClass.protected, 'Core Android media framework module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.media.swcodec': PackageInfo('Android Media Codec module', SafetyClass.protected, 'Core Android software codecs.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.mediaprovider': PackageInfo('Android MediaProvider module', SafetyClass.protected, 'Core Android media provider.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.sdkext': PackageInfo('Android SDK Extensions module', SafetyClass.protected, 'Android SDK extension module.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.os.statsd': PackageInfo('Android statsd module', SafetyClass.protected, 'Android platform statistics infrastructure.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.tethering': PackageInfo('Android Tethering module', SafetyClass.protected, 'Hotspot/tethering implementation.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.wifi': PackageInfo('Android Wi-Fi module', SafetyClass.protected, 'Core Android Wi-Fi implementation.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.ipsec': PackageInfo('Android IPsec module', SafetyClass.protected, 'Core IPsec/IKE implementation.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.neuralnetworks': PackageInfo('Android NNAPI module', SafetyClass.protected, 'Android neural-networks runtime.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.art': PackageInfo('Android Runtime module', SafetyClass.protected, 'Android Runtime (ART). Never remove.', deGoogleTier: DeGoogleTier.core),
+    'com.google.android.adbd': PackageInfo('Android ADB module', SafetyClass.protected, 'Android debugging daemon module.', deGoogleTier: DeGoogleTier.core),
 
-    // Google applications that are generally safe to remove if their feature
-    // is not needed.
-    'com.android.chrome': RiskInfo(
-      'Google Chrome',
-      RiskLevel.low,
-      'Install another browser if needed.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.gm': RiskInfo(
-      'Gmail',
-      RiskLevel.low,
-      'Gmail app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.maps': RiskInfo(
-      'Google Maps',
-      RiskLevel.low,
-      'Google Maps app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.mapslite': RiskInfo(
-      'Google Maps Go',
-      RiskLevel.low,
-      'Google Maps Go app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.photos': RiskInfo(
-      'Google Photos',
-      RiskLevel.low,
-      'Google Photos app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.photosgo': RiskInfo(
-      'Gallery Go / Google Photos Go',
-      RiskLevel.low,
-      'Google gallery app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.docs': RiskInfo(
-      'Google Drive',
-      RiskLevel.low,
-      'Google Drive app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.nbu.files': RiskInfo(
-      'Files by Google',
-      RiskLevel.low,
-      'Files by Google app. Android DocumentsUI is protected separately.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.calendar': RiskInfo(
-      'Google Calendar',
-      RiskLevel.low,
-      'Google Calendar app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.contacts': RiskInfo(
-      'Google Contacts',
-      RiskLevel.medium,
-      'Install another contacts app if needed.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.youtube': RiskInfo(
-      'YouTube',
-      RiskLevel.low,
-      'YouTube app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.youtube.music': RiskInfo(
-      'YouTube Music',
-      RiskLevel.low,
-      'YouTube Music app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.youtube.kids': RiskInfo(
-      'YouTube Kids',
-      RiskLevel.low,
-      'YouTube Kids app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.tachyon': RiskInfo(
-      'Google Meet',
-      RiskLevel.low,
-      'Google Meet app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.keep': RiskInfo(
-      'Google Keep',
-      RiskLevel.low,
-      'Google Keep app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.videos': RiskInfo(
-      'Google TV',
-      RiskLevel.low,
-      'Google TV app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.magazines': RiskInfo(
-      'Google News',
-      RiskLevel.low,
-      'Google News app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.walletnfcrel': RiskInfo(
-      'Google Wallet',
-      RiskLevel.medium,
-      'Google Wallet/contactless payment features will stop.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.subscriptions.red': RiskInfo(
-      'Google One',
-      RiskLevel.low,
-      'Google One app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.podcasts': RiskInfo(
-      'Google Podcasts',
-      RiskLevel.low,
-      'Legacy Google Podcasts app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.translate': RiskInfo(
-      'Google Translate',
-      RiskLevel.low,
-      'Google Translate app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.authenticator2': RiskInfo(
-      'Google Authenticator',
-      RiskLevel.medium,
-      'Export/migrate 2FA accounts before removing this app.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.apps.chromecast.app': RiskInfo(
-      'Google Home',
-      RiskLevel.low,
-      'Google Home / Cast device management app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.books': RiskInfo(
-      'Google Play Books',
-      RiskLevel.low,
-      'Google Play Books app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.music': RiskInfo(
-      'Google Play Music (legacy)',
-      RiskLevel.low,
-      'Legacy Google Play Music app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.plus': RiskInfo(
-      'Google+ (legacy)',
-      RiskLevel.low,
-      'Legacy Google+ app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.genie.geniewidget': RiskInfo(
-      'Google News & Weather (legacy)',
-      RiskLevel.low,
-      'Legacy Google News/Weather app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.ears': RiskInfo(
-      'Google Sound Search (legacy)',
-      RiskLevel.low,
-      'Legacy Google Sound Search component.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.ar.lens': RiskInfo(
-      'Google Lens',
-      RiskLevel.low,
-      'Google Lens app/service.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
+    // Google consumer apps: explicitly curated and appropriate for the
+    // Recommended De-Google preset when they are not a critical current role.
+    'com.google.android.youtube': PackageInfo('YouTube', SafetyClass.knownRemovable, 'Google YouTube app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.gm': PackageInfo('Gmail', SafetyClass.knownRemovable, 'Google Gmail app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.docs': PackageInfo('Google Drive', SafetyClass.knownRemovable, 'Google Drive app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.photos': PackageInfo('Google Photos', SafetyClass.knownRemovable, 'Google Photos app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.videos': PackageInfo('Google TV / Play Movies', SafetyClass.knownRemovable, 'Google video/TV app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.music': PackageInfo('Google Play Music', SafetyClass.knownRemovable, 'Legacy Google music app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.ar.lens': PackageInfo('Google Lens', SafetyClass.knownRemovable, 'Google Lens app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.feedback': PackageInfo('Google Feedback', SafetyClass.knownRemovable, 'Google feedback/reporting component.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.tachyon': PackageInfo('Google Meet / Duo', SafetyClass.knownRemovable, 'Google video calling app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.podcasts': PackageInfo('Google Podcasts', SafetyClass.knownRemovable, 'Legacy Google Podcasts app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.maps': PackageInfo('Google Maps', SafetyClass.featureDependent, 'Navigation/location features are removed. Install an alternative if needed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
 
-    // Packages that can be removed, but Droid Purifier will never select them
-    // automatically because doing so can remove an essential user-facing role.
-    'com.google.android.inputmethod.latin': RiskInfo(
-      'Gboard',
-      RiskLevel.high,
-      'Install and enable another keyboard before removing Gboard.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.dialer': RiskInfo(
-      'Google Phone',
-      RiskLevel.high,
-      'Install and set another dialer before removing Google Phone.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.apps.messaging': RiskInfo(
-      'Google Messages',
-      RiskLevel.high,
-      'Install and set another SMS app before removing Google Messages.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.GoogleCamera': RiskInfo(
-      'Google Camera',
-      RiskLevel.high,
-      'Install another camera app before removing the stock camera.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.GoogleCameraEng': RiskInfo(
-      'Google Camera',
-      RiskLevel.high,
-      'Install another camera app before removing the stock camera.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.apps.nexuslauncher': RiskInfo(
-      'Pixel Launcher',
-      RiskLevel.high,
-      'Install and set another launcher before removing Pixel Launcher.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.deskclock': RiskInfo(
-      'Google Clock',
-      RiskLevel.medium,
-      'Alarms/timers in Google Clock will be removed.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.calculator': RiskInfo(
-      'Google Calculator',
-      RiskLevel.low,
-      'Google Calculator app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.wallpaper': RiskInfo(
-      'Google Wallpapers',
-      RiskLevel.low,
-      'Google wallpaper picker/content.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.recorder': RiskInfo(
-      'Google Recorder',
-      RiskLevel.low,
-      'Google Recorder app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
-    'com.google.android.apps.tips': RiskInfo(
-      'Pixel Tips',
-      RiskLevel.low,
-      'Google/Pixel tips app.',
-      deGoogleTier: DeGoogleTier.recommended,
-      autoSelect: true,
-    ),
+    // Google framework/services. Full De-Google may select these, but the UI
+    // must explain the feature impact and third-party compatibility impact.
+    'com.google.android.gms': PackageInfo('Google Play Services', SafetyClass.featureDependent, 'Removing it can break apps that use Google APIs, FCM or Play Integrity.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gsf': PackageInfo('Google Services Framework', SafetyClass.featureDependent, 'Core Google account/service framework. Android can run without it, but Google-dependent apps may fail.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gsf.login': PackageInfo('Google Account Manager (legacy)', SafetyClass.featureDependent, 'Legacy Google account sign-in component.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.android.vending': PackageInfo('Google Play Store', SafetyClass.featureDependent, 'Google app store. Install another app source before removing if desired.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.googlequicksearchbox': PackageInfo('Google App / Assistant', SafetyClass.featureDependent, 'Google Search and Assistant integration.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.restore': PackageInfo('Google Restore', SafetyClass.featureDependent, 'Google device restore functionality.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.backuptransport': PackageInfo('Google Backup Transport', SafetyClass.featureDependent, 'Legacy Google cloud backup transport.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.turbo': PackageInfo('Device Health Services', SafetyClass.featureDependent, 'Google battery/device-health prediction features.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.partnersetup': PackageInfo('Google Partner Setup', SafetyClass.featureDependent, 'Google partner/setup integration.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.onetimeinitializer': PackageInfo('Google One-Time Initializer', SafetyClass.featureDependent, 'Google first-run initialization component.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.syncadapters.calendar': PackageInfo('Google Calendar Sync', SafetyClass.featureDependent, 'Google calendar account sync.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.syncadapters.contacts': PackageInfo('Google Contacts Sync', SafetyClass.featureDependent, 'Google contacts account sync.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gms.location.history': PackageInfo('Google Location History', SafetyClass.featureDependent, 'Google location-history service.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.projection.gearhead': PackageInfo('Android Auto', SafetyClass.featureDependent, 'Android Auto will stop working.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.printservice.recommendation': PackageInfo('Google Print Recommendation', SafetyClass.featureDependent, 'Printer recommendation service.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.wellbeing': PackageInfo('Digital Wellbeing', SafetyClass.featureDependent, 'Digital Wellbeing features will be removed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.tts': PackageInfo('Google Text-to-Speech', SafetyClass.featureDependent, 'Install another TTS engine first if speech output is needed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.configupdater': PackageInfo('Google Config Updater', SafetyClass.featureDependent, 'Google-delivered system configuration updates will stop.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.setupwizard': PackageInfo('Google Setup Wizard', SafetyClass.featureDependent, 'Only remove after initial device setup has completed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
 
-    // Advanced/uncertain integrations. They are intentionally manual because
-    // their impact varies by Android release, carrier, or device.
-    'com.google.android.configupdater': RiskInfo(
-      'Google Config Updater',
-      RiskLevel.high,
-      'Updates security/configuration data on some stock Android releases. Advanced removal only.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.ims': RiskInfo(
-      'Google Carrier Services',
-      RiskLevel.high,
-      'Carrier/RCS/IMS behavior varies by device. Do not auto-remove.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.carriersetup': RiskInfo(
-      'Google Carrier Setup',
-      RiskLevel.high,
-      'Carrier provisioning behavior varies by device and network.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.apps.enterprise.dmagent': RiskInfo(
-      'Google Enterprise Device Management',
-      RiskLevel.high,
-      'May be required on managed/work devices.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
-    'com.google.android.apps.work.clouddpc': RiskInfo(
-      'Android Device Policy',
-      RiskLevel.high,
-      'May be required for work profiles or enterprise management.',
-      deGoogleTier: DeGoogleTier.manual,
-      autoSelect: false,
-    ),
+    // Role-sensitive Google apps. Never auto-select: the dynamic scanner may
+    // protect them if currently used as launcher/IME/dialer/SMS/WebView.
+    'com.google.android.inputmethod.latin': PackageInfo('Gboard', SafetyClass.featureDependent, 'Keyboard. Install/select another keyboard before removing.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.dialer': PackageInfo('Google Phone', SafetyClass.featureDependent, 'Dialer. Select another dialer before removing.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.apps.messaging': PackageInfo('Google Messages', SafetyClass.featureDependent, 'SMS/RCS app. Select another SMS app before removing.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.GoogleCamera': PackageInfo('Google Camera', SafetyClass.featureDependent, 'Camera app. Keep another camera app available.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.apps.nexuslauncher': PackageInfo('Pixel Launcher', SafetyClass.featureDependent, 'Launcher. Install/select another launcher before removing.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.marvin.talkback': PackageInfo('TalkBack', SafetyClass.featureDependent, 'Accessibility screen reader. Do not remove if you rely on it.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.apps.authenticator2': PackageInfo('Google Authenticator', SafetyClass.featureDependent, 'May contain access to 2FA codes; migrate first.', deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.ims': PackageInfo('Carrier Services', SafetyClass.featureDependent, 'Can affect carrier messaging/RCS features.', deGoogleTier: DeGoogleTier.manual),
+    'com.android.chrome': PackageInfo('Google Chrome', SafetyClass.featureDependent, 'Browser. Install another browser first if this is your only browser.', deGoogleTier: DeGoogleTier.manual),
 
-    // Manufacturer bloatware retained from the existing app.
-    'com.samsung.android.app.spage': RiskInfo('Samsung Free', RiskLevel.low, 'Samsung Free / Discover feed.'),
-    'com.samsung.android.app.tips': RiskInfo('Samsung Tips', RiskLevel.low, 'Samsung tips and onboarding content.'),
-    'com.samsung.android.game.gamehome': RiskInfo('Samsung Gaming Hub', RiskLevel.low, 'Samsung gaming launcher.'),
-    'com.samsung.android.game.gametools': RiskInfo('Samsung Game Tools', RiskLevel.low, 'Samsung gaming overlay tools.'),
-    'com.samsung.android.aremoji': RiskInfo('Samsung AR Emoji', RiskLevel.low, 'AR Emoji features.'),
-    'com.samsung.android.arzone': RiskInfo('Samsung AR Zone', RiskLevel.low, 'AR Zone features.'),
-    'com.samsung.android.kidsinstaller': RiskInfo('Samsung Kids Installer', RiskLevel.low, 'Samsung Kids bootstrap component.'),
-    'com.samsung.android.bixby.agent': RiskInfo('Bixby Voice', RiskLevel.medium, 'Bixby voice features may stop.'),
-    'com.samsung.android.bixby.wakeup': RiskInfo('Bixby Wakeup', RiskLevel.low, 'Bixby wake-word component.'),
-    'com.miui.analytics': RiskInfo('MIUI Analytics', RiskLevel.low, 'Xiaomi analytics component.'),
-    'com.miui.msa.global': RiskInfo('MIUI System Ads', RiskLevel.low, 'MIUI advertising service.'),
-    'com.xiaomi.mipicks': RiskInfo('GetApps', RiskLevel.low, 'Xiaomi GetApps store.'),
-    'com.miui.hybrid': RiskInfo('MIUI Quick Apps', RiskLevel.low, 'MIUI Quick Apps framework.'),
-    'com.miui.hybrid.accessory': RiskInfo('Quick Apps Accessory', RiskLevel.low, 'MIUI Quick Apps accessory component.'),
-    'com.miui.yellowpage': RiskInfo('MIUI Yellow Pages', RiskLevel.low, 'Business/caller information component.'),
-    'com.miui.player': RiskInfo('Mi Music', RiskLevel.low, 'Xiaomi music app.'),
-    'com.miui.videoplayer': RiskInfo('Mi Video', RiskLevel.low, 'Xiaomi video app.'),
-    'com.heytap.browser': RiskInfo('HeyTap Browser', RiskLevel.low, 'OEM browser.'),
-    'com.heytap.market': RiskInfo('HeyTap App Market', RiskLevel.low, 'OEM app market.'),
-    'com.oppo.market': RiskInfo('OPPO App Market', RiskLevel.low, 'OPPO app market.'),
-    'com.coloros.video': RiskInfo('ColorOS Video', RiskLevel.low, 'ColorOS video app.'),
-    'com.coloros.gamespace': RiskInfo('ColorOS Game Space', RiskLevel.low, 'ColorOS gaming hub.'),
-    'com.facebook.appmanager': RiskInfo('Meta App Manager', RiskLevel.low, 'Meta preload updater.'),
-    'com.facebook.services': RiskInfo('Meta Services', RiskLevel.low, 'Background Meta preload services.'),
-    'com.facebook.system': RiskInfo('Meta App Installer', RiskLevel.low, 'Meta preload installer.'),
+    // Common explicitly-known OEM/social bloat. This is intentionally small;
+    // unknown OEM packages stay Unknown instead of being guessed safe.
+    'com.facebook.katana': PackageInfo('Facebook', SafetyClass.knownRemovable, 'Facebook consumer app.', autoSelect: true),
+    'com.facebook.appmanager': PackageInfo('Meta App Manager', SafetyClass.knownRemovable, 'Meta/Facebook preload manager.', autoSelect: true),
+    'com.facebook.services': PackageInfo('Meta Services', SafetyClass.knownRemovable, 'Meta/Facebook preload service.', autoSelect: true),
+    'com.facebook.system': PackageInfo('Meta App Installer', SafetyClass.knownRemovable, 'Meta/Facebook preload installer.', autoSelect: true),
+    'com.miui.analytics': PackageInfo('MIUI Analytics', SafetyClass.knownRemovable, 'Xiaomi analytics component.', autoSelect: true),
+    'com.miui.msa.global': PackageInfo('MIUI System Ads', SafetyClass.knownRemovable, 'Xiaomi advertising service.', autoSelect: true),
   };
-
-  static const Set<String> manufacturerBloat = {
-    'com.samsung.android.app.spage',
-    'com.samsung.android.app.tips',
-    'com.samsung.android.game.gamehome',
-    'com.samsung.android.game.gametools',
-    'com.samsung.android.aremoji',
-    'com.samsung.android.arzone',
-    'com.samsung.android.kidsinstaller',
-    'com.samsung.android.bixby.agent',
-    'com.samsung.android.bixby.wakeup',
-    'com.miui.analytics',
-    'com.miui.msa.global',
-    'com.xiaomi.mipicks',
-    'com.miui.hybrid',
-    'com.miui.hybrid.accessory',
-    'com.miui.yellowpage',
-    'com.miui.player',
-    'com.miui.videoplayer',
-    'com.heytap.browser',
-    'com.heytap.market',
-    'com.oppo.market',
-    'com.coloros.video',
-    'com.coloros.gamespace',
-    'com.facebook.appmanager',
-    'com.facebook.services',
-    'com.facebook.system',
-  };
-
-  static const List<String> _googleCorePrefixes = [
-    'com.google.android.overlay.',
-    'com.google.android.overlay.modules.',
-    'com.google.android.networkstack.',
-    'com.google.android.permission.',
-  ];
 
   static bool isGoogleRelated(String packageName) =>
       packageName.startsWith('com.google.') ||
-      packageName == 'com.android.chrome' ||
-      packageName == 'com.android.vending';
+      packageName == 'com.android.vending' ||
+      packageName == 'com.android.chrome';
 
-  static RiskInfo get(
+  static PackageInfo classify(
     String packageName, {
-    int? sdkInt,
-    bool isApex = false,
-    bool setupComplete = true,
+    required bool isSystem,
+    required bool isApex,
+    required bool isOverlay,
+    required bool isCriticalRole,
+    required bool isCurrentWebView,
+    required bool setupComplete,
   }) {
-    // APEX packages are Android platform modules. New Android versions can add
-    // modules that this app has never seen; protecting them dynamically is the
-    // compatibility safety net for future releases.
+    final base = exact[packageName];
+
+    if (packageName == 'android') return exact['android']!;
     if (isApex) {
-      return RiskInfo(
-        prettyName(packageName),
-        RiskLevel.protected,
-        'Detected as an Android APEX/Mainline system module. Droid Purifier never auto-removes APEX modules.',
+      return PackageInfo(
+        base?.name ?? packageName,
+        SafetyClass.protected,
+        'Detected as an Android APEX/Mainline package on this device.',
         deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none,
       );
     }
-
+    if (isOverlay) {
+      return PackageInfo(
+        base?.name ?? packageName,
+        SafetyClass.protected,
+        'Detected as an Android runtime resource overlay on this device.',
+        deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none,
+      );
+    }
+    if (isCriticalRole) {
+      return PackageInfo(
+        base?.name ?? packageName,
+        SafetyClass.protected,
+        'Currently provides a critical device role (launcher, keyboard, dialer, SMS or accessibility). Choose a replacement first.',
+        deGoogleTier: base?.deGoogleTier ?? DeGoogleTier.none,
+      );
+    }
+    if (isCurrentWebView) {
+      return PackageInfo(
+        base?.name ?? packageName,
+        SafetyClass.protected,
+        'Current WebView provider. Select another working WebView provider before removal.',
+        deGoogleTier: base?.deGoogleTier ?? DeGoogleTier.core,
+      );
+    }
     if (packageName == 'com.google.android.setupwizard' && !setupComplete) {
-      return const RiskInfo(
+      return const PackageInfo(
         'Google Setup Wizard',
-        RiskLevel.protected,
-        'Initial Android setup is not complete. Keep Setup Wizard until provisioning finishes.',
+        SafetyClass.protected,
+        'Device setup is not complete. Setup Wizard is temporarily protected.',
         deGoogleTier: DeGoogleTier.core,
       );
     }
+    if (base != null) return base;
 
-    final known = exact[packageName];
-    if (known != null) return known;
-
-    if (_googleCorePrefixes.any(packageName.startsWith)) {
-      return RiskInfo(
-        'Android system overlay/module',
-        RiskLevel.protected,
-        'Google-namespaced Android platform resource/module. Keep it for system compatibility.',
-        deGoogleTier: DeGoogleTier.core,
-      );
-    }
-
-    if (packageName.contains('.overlay.') && packageName.startsWith('com.google.')) {
-      return const RiskInfo(
-        'Android system resource overlay',
-        RiskLevel.protected,
-        'Runtime resource overlay for an Android system component; no privacy benefit from removing it.',
-        deGoogleTier: DeGoogleTier.core,
-      );
-    }
-
-    if (packageName.startsWith('com.android.')) {
-      return const RiskInfo(
-        'Android system component',
-        RiskLevel.high,
-        'Unknown Android system package. Review carefully; it is never auto-selected.',
-      );
-    }
-
-    if (packageName.startsWith('com.google.')) {
-      return const RiskInfo(
-        'Unclassified Google package',
-        RiskLevel.high,
-        'Not recognized by the current safety database. It is never auto-selected; verify its role before removal.',
-        deGoogleTier: DeGoogleTier.manual,
-        autoSelect: false,
-      );
-    }
-
-    const prefixes = <String>[
-      'com.samsung.',
-      'com.sec.',
-      'com.miui.',
-      'com.xiaomi.',
-      'com.oneplus.',
-      'com.oplus.',
-      'com.coloros.',
-      'com.oppo.',
-      'com.heytap.',
-      'com.realme.',
-      'com.vivo.',
-      'com.iqoo.',
-    ];
-    if (prefixes.any(packageName.startsWith)) {
-      return RiskInfo(
-        prettyName(packageName),
-        RiskLevel.medium,
-        'OEM package not in the curated database. It is not selected automatically.',
-      );
-    }
-
-    return RiskInfo(
-      prettyName(packageName),
-      RiskLevel.low,
-      'Third-party or uncategorized package. It is not selected automatically.',
-    );
-  }
-
-  static bool isProtected(
-    String packageName, {
-    int? sdkInt,
-    bool isApex = false,
-    bool setupComplete = true,
-  }) =>
-      get(
+    // Generic namespaces are NEVER trusted as removable.
+    if (packageName.startsWith('android.') ||
+        packageName.startsWith('com.android.') ||
+        packageName.startsWith('com.google.android.overlay.') ||
+        packageName.contains('.overlay.') ||
+        packageName.endsWith('.overlay')) {
+      return PackageInfo(
         packageName,
-        sdkInt: sdkInt,
-        isApex: isApex,
-        setupComplete: setupComplete,
-      ).protected;
+        SafetyClass.unknown,
+        'Unverified Android/OEM system package. Droid Purifier will not bulk-select it.',
+      );
+    }
 
-  static bool isRecommendedDeGoogle(
-    String packageName, {
-    int? sdkInt,
-    bool isApex = false,
-    bool setupComplete = true,
-  }) {
-    final info = get(
+    if (isGoogleRelated(packageName)) {
+      return PackageInfo(
+        packageName,
+        SafetyClass.unknown,
+        'Unverified Google-namespaced package. Not automatically selected.',
+        deGoogleTier: DeGoogleTier.manual,
+      );
+    }
+
+    if (isSystem) {
+      return PackageInfo(
+        packageName,
+        SafetyClass.unknown,
+        'Unverified system/OEM package. Not automatically selected.',
+      );
+    }
+
+    return PackageInfo(
       packageName,
-      sdkInt: sdkInt,
-      isApex: isApex,
-      setupComplete: setupComplete,
+      SafetyClass.featureDependent,
+      'User-installed app. Android should remain functional, but the app and its features will be unavailable.',
     );
-    return info.deGoogleTier == DeGoogleTier.recommended && info.autoSelect && !info.protected;
   }
 
-  static bool isFullDeGoogle(
-    String packageName, {
-    int? sdkInt,
-    bool isApex = false,
-    bool setupComplete = true,
-  }) {
-    final info = get(
-      packageName,
-      sdkInt: sdkInt,
-      isApex: isApex,
-      setupComplete: setupComplete,
-    );
-    final tier = info.deGoogleTier;
-    return (tier == DeGoogleTier.recommended || tier == DeGoogleTier.full) &&
-        info.autoSelect &&
-        !info.protected;
-  }
+  static bool recommendedCandidate(PackageInfo info) =>
+      info.deGoogleTier == DeGoogleTier.recommended &&
+      info.safety == SafetyClass.knownRemovable &&
+      info.autoSelect;
 
-  static bool isCuratedSafeSelection(
-    String packageName, {
-    int? sdkInt,
-    bool isApex = false,
-    bool setupComplete = true,
-  }) {
-    final info = get(
-      packageName,
-      sdkInt: sdkInt,
-      isApex: isApex,
-      setupComplete: setupComplete,
-    );
-    if (info.protected || !info.autoSelect) return false;
-    return info.level == RiskLevel.low || info.level == RiskLevel.medium;
-  }
+  static bool fullCandidate(PackageInfo info) =>
+      (info.deGoogleTier == DeGoogleTier.recommended ||
+          info.deGoogleTier == DeGoogleTier.full) &&
+      !info.protected &&
+      info.safety != SafetyClass.unknown &&
+      info.autoSelect;
 
-  static String prettyName(String packageName) {
-    final value = packageName.split('.').last.replaceAll('_', ' ');
-    if (value.isEmpty) return packageName;
-    return '${value[0].toUpperCase()}${value.substring(1)}';
-  }
+  static bool knownRemovableCandidate(PackageInfo info) =>
+      info.safety == SafetyClass.knownRemovable && info.autoSelect;
 }
