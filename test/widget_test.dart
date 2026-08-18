@@ -1,167 +1,172 @@
 import 'package:droid_purifier/package_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+PackageInfo classify(
+  String packageName, {
+  bool system = true,
+  bool apex = false,
+  bool overlay = false,
+  bool role = false,
+  bool webView = false,
+  bool setupComplete = true,
+}) {
+  return PackagePolicy.classify(
+    packageName,
+    isSystem: system,
+    isApex: apex,
+    isOverlay: overlay,
+    isCriticalRole: role,
+    isCurrentWebView: webView,
+    setupComplete: setupComplete,
+  );
+}
+
 void main() {
-  group('Android core protection', () {
-    test('protects classic Android packages', () {
-      expect(RiskDatabase.isProtected('com.android.systemui'), isTrue);
-      expect(RiskDatabase.isProtected('com.android.settings'), isTrue);
-      expect(RiskDatabase.isProtected('com.android.packageinstaller'), isTrue);
+  group('Fail-safe classification', () {
+    test('Android framework is protected', () {
+      expect(classify('android').safety, SafetyClass.protected);
+      expect(classify('com.android.systemui').safety, SafetyClass.protected);
+      expect(classify('com.android.settings').safety, SafetyClass.protected);
     });
 
-    test('protects Google-build Android 10 core modules', () {
+    test('unknown Android and OEM system packages are never called removable', () {
+      expect(classify('android.some.future.component').safety, SafetyClass.unknown);
+      expect(classify('com.android.some.future.component').safety, SafetyClass.unknown);
+      expect(classify('com.vendor.hidden.framework').safety, SafetyClass.unknown);
       expect(
-        RiskDatabase.isProtected(
-          'com.google.android.permissioncontroller',
-          sdkInt: 29,
+        PackagePolicy.knownRemovableCandidate(
+          classify('com.vendor.hidden.framework'),
         ),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected('com.google.android.documentsui', sdkInt: 29),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected('com.google.android.ext.services', sdkInt: 29),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected('com.google.android.modulemetadata', sdkInt: 29),
-        isTrue,
+        isFalse,
       );
     });
 
-    test('protects modern Mainline aliases and future APEX packages', () {
+    test('unknown Google packages fail safe', () {
+      final info = classify('com.google.android.some.future.service');
+      expect(info.safety, SafetyClass.unknown);
+      expect(info.autoSelect, isFalse);
+      expect(info.deGoogleTier, DeGoogleTier.manual);
+    });
+  });
+
+  group('Dynamic device protection', () {
+    test('APEX packages are protected even if unknown', () {
       expect(
-        RiskDatabase.isProtected('com.google.android.permission', sdkInt: 34),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected('com.google.android.conscrypt', sdkInt: 34),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected('com.google.android.resolv', sdkInt: 34),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected(
-          'com.google.android.future.module',
-          sdkInt: 36,
-          isApex: true,
-        ),
-        isTrue,
+        classify('com.google.android.future.module', apex: true).safety,
+        SafetyClass.protected,
       );
     });
 
-    test('protects Google Android overlays', () {
+    test('runtime overlays are protected even if unknown', () {
       expect(
-        RiskDatabase.isProtected(
-          'com.google.android.overlay.modules.permissioncontroller',
-          sdkInt: 29,
-        ),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isProtected(
-          'com.google.android.overlay.modules.ext.services',
-          sdkInt: 29,
-        ),
-        isTrue,
+        classify('android.miui.overlay', overlay: true).safety,
+        SafetyClass.protected,
       );
     });
 
-    test('protects WebView by default', () {
+    test('current device roles override a removable rule', () {
       expect(
-        RiskDatabase.isProtected('com.google.android.webview', sdkInt: 29),
-        isTrue,
+        classify('com.google.android.inputmethod.latin', role: true).safety,
+        SafetyClass.protected,
+      );
+      expect(
+        classify('com.google.android.apps.nexuslauncher', role: true).safety,
+        SafetyClass.protected,
+      );
+    });
+
+    test('current WebView provider is protected', () {
+      expect(
+        classify('com.google.android.webview', webView: true).safety,
+        SafetyClass.protected,
+      );
+    });
+
+    test('setup wizard is protected until provisioning finishes', () {
+      expect(
+        classify(
+          'com.google.android.setupwizard',
+          setupComplete: false,
+        ).safety,
+        SafetyClass.protected,
+      );
+      expect(
+        classify(
+          'com.google.android.setupwizard',
+          setupComplete: true,
+        ).safety,
+        SafetyClass.featureDependent,
       );
     });
   });
 
   group('De-Google presets', () {
-    test('recommended preset removes ordinary Google apps but keeps framework', () {
-      expect(RiskDatabase.isRecommendedDeGoogle('com.google.android.gm'), isTrue);
+    test('recommended only auto-selects explicitly known removable Google apps', () {
       expect(
-        RiskDatabase.isRecommendedDeGoogle('com.google.android.youtube'),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isRecommendedDeGoogle('com.google.android.gms'),
-        isFalse,
-      );
-      expect(
-        RiskDatabase.isRecommendedDeGoogle('com.google.android.gsf'),
-        isFalse,
-      );
-      expect(
-        RiskDatabase.isRecommendedDeGoogle('com.android.vending'),
-        isFalse,
-      );
-    });
-
-    test('full preset includes Google framework but never Android core', () {
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.gms'), isTrue);
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.gsf'), isTrue);
-      expect(RiskDatabase.isFullDeGoogle('com.android.vending'), isTrue);
-      expect(
-        RiskDatabase.isFullDeGoogle('com.google.android.permissioncontroller'),
-        isFalse,
-      );
-      expect(
-        RiskDatabase.isFullDeGoogle('com.google.android.documentsui'),
-        isFalse,
-      );
-    });
-
-    test('supports legacy Google packages on older Android', () {
-      expect(
-        RiskDatabase.isFullDeGoogle('com.google.android.gsf.login', sdkInt: 23),
-        isTrue,
-      );
-      expect(
-        RiskDatabase.isFullDeGoogle(
-          'com.google.android.backuptransport',
-          sdkInt: 23,
+        PackagePolicy.recommendedCandidate(
+          classify('com.google.android.youtube'),
         ),
         isTrue,
       );
       expect(
-        RiskDatabase.isRecommendedDeGoogle('com.google.android.music', sdkInt: 23),
-        isTrue,
-      );
-    });
-
-    test('does not auto-select role apps requiring replacements', () {
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.inputmethod.latin'), isFalse);
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.dialer'), isFalse);
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.apps.messaging'), isFalse);
-      expect(RiskDatabase.isFullDeGoogle('com.google.android.GoogleCamera'), isFalse);
-    });
-
-    test('unknown future Google packages fail safe', () {
-      final info = RiskDatabase.get('com.google.android.some.future.service', sdkInt: 36);
-      expect(info.level, RiskLevel.high);
-      expect(info.autoSelect, isFalse);
-      expect(info.deGoogleTier, DeGoogleTier.manual);
-    });
-
-    test('setup wizard is locked until provisioning completes', () {
-      expect(
-        RiskDatabase.isProtected(
-          'com.google.android.setupwizard',
-          sdkInt: 29,
-          setupComplete: false,
+        PackagePolicy.recommendedCandidate(
+          classify('com.google.android.gm'),
         ),
         isTrue,
       );
       expect(
-        RiskDatabase.isFullDeGoogle(
-          'com.google.android.setupwizard',
-          sdkInt: 29,
-          setupComplete: true,
+        PackagePolicy.recommendedCandidate(
+          classify('com.google.android.gms'),
         ),
+        isFalse,
+      );
+    });
+
+    test('full includes Google framework but never protected Android core', () {
+      expect(
+        PackagePolicy.fullCandidate(classify('com.google.android.gms')),
         isTrue,
+      );
+      expect(
+        PackagePolicy.fullCandidate(classify('com.google.android.gsf')),
+        isTrue,
+      );
+      expect(
+        PackagePolicy.fullCandidate(classify('com.android.vending')),
+        isTrue,
+      );
+      expect(
+        PackagePolicy.fullCandidate(
+          classify('com.google.android.permissioncontroller'),
+        ),
+        isFalse,
+      );
+      expect(
+        PackagePolicy.fullCandidate(
+          classify('com.google.android.documentsui'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('role-sensitive apps remain manual by default', () {
+      expect(
+        PackagePolicy.fullCandidate(
+          classify('com.google.android.inputmethod.latin'),
+        ),
+        isFalse,
+      );
+      expect(
+        PackagePolicy.fullCandidate(
+          classify('com.google.android.dialer'),
+        ),
+        isFalse,
+      );
+      expect(
+        PackagePolicy.fullCandidate(
+          classify('com.google.android.apps.messaging'),
+        ),
+        isFalse,
       );
     });
   });
