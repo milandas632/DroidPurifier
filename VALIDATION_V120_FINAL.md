@@ -1,0 +1,1 @@
+Temporary CI marker for the final Droid Purifier 1.2.0 Windows package build. Do not merge.
