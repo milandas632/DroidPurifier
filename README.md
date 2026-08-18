@@ -1,111 +1,136 @@
 # Droid Purifier
 
-Droid Purifier is a cross-platform Flutter desktop app for auditing and removing Android packages over ADB **without root**. Its main UX difference is first-class **multi-select bulk removal directly from the installed-app list**, plus curated one-click selection presets.
+Droid Purifier is a Flutter desktop tool for **De-Googling and debloating Android phones over ADB without root**. It focuses on direct multi-select package removal while protecting Android components that must remain for the operating system to function.
 
-> Removing Android system packages can break device features. Use this software at your own risk. Droid Purifier removes packages only for Android user 0 using `pm uninstall -k --user 0`; it does not erase APKs from the read-only system partition.
+> Removing system packages always carries risk and OEM builds differ. Droid Purifier is intentionally conservative: unknown Google/system packages are never auto-selected, Android core/Mainline modules are protected, and every removal batch is reviewed before execution.
 
-## Highlights
+## Version 1.2 highlights
 
-- Windows and macOS desktop UI built with Flutter.
-- Detects multiple connected ADB devices and shows manufacturer/model/Android version.
-- Search and filter installed packages.
-- Checkbox selection directly in the main package list.
-- **Recommended Safe Debloat** preset.
-- **Remove Google Apps** preset that deliberately excludes Google Play services, Google Services Framework, and Play Store.
-- **Manufacturer Bloatware** preset with curated Samsung, Xiaomi/MIUI, OPPO/ColorOS/HeyTap, realme-related and Meta preload packages.
-- Presets only select packages; they never remove anything automatically.
-- **Select visible** and **Clear selection** shortcuts.
-- Bulk review screen before removal.
-- Built-in Low / Medium / High / Critical / Protected risk levels.
-- Protected Android core packages cannot be selected.
-- High/Critical bulk operations require typing `CONFIRM`.
-- Optional APK + split-APK backup before every removal.
-- If one package backup fails, that package is not removed.
-- Bulk progress and per-package failure results.
-- Restore via `cmd package install-existing --user 0`, with backed-up APK fallback.
-- No telemetry or network calls from the app itself.
+- **Recommended De-Google** — selects ordinary Google apps and curated non-core Google services while keeping Google Play services, Google Services Framework, and Play Store.
+- **Full De-Google** — additionally selects Play services, GSF, Play Store, Google account/sync/backup/Assistant-style services and other curated Google integrations.
+- **Android core stays protected even in Full De-Google.** A package using a `com.google.*` name is not automatically considered bloatware.
+- Detects Android version and API level.
+- Detects APEX/Mainline packages on modern Android and locks them automatically.
+- Protects Android 10 Google-build core packages such as Permission Controller, DocumentsUI, ExtServices and Module Metadata.
+- Protects modern Mainline aliases such as Android permission, networking, Conscrypt, DNS Resolver, ART/runtime and other platform modules.
+- Protects Google Android resource overlays (`com.google.android.overlay.*`).
+- Protects Android System WebView by default because a working WebView provider may be required by many apps.
+- Unknown future `com.google.*` packages fail safe as **Manual Review** instead of being automatically selected.
+- Setup Wizard is protected while Android initial provisioning is incomplete.
+- Role-sensitive apps such as keyboard, dialer, SMS, camera, launcher, TalkBack and some carrier/enterprise components are **Manual Review** and are not auto-selected.
+- **Select safe shown** replaces unrestricted Select Visible.
+- High/Critical removals require typing `CONFIRM`.
+- Optional APK + split-APK backup before each removal.
+- Restore tries multiple Android-compatible methods, then falls back to the saved APK files.
 
-## Preset safety model
+## What “Full De-Google” means
 
-The presets are intentionally allow-list based. Droid Purifier does **not** select every package beginning with `com.samsung`, `com.miui`, `com.google`, etc. Only package IDs in the curated preset database are selected.
+Full De-Google aims to remove Google applications and Google service infrastructure that can be removed for Android user 0 without deliberately removing Android platform components.
 
-The Google preset does not include:
+It may select packages such as:
 
-- `com.google.android.gms` — Google Play services
-- `com.google.android.gsf` — Google Services Framework
-- `com.android.vending` — Google Play Store
+- Google Play services
+- Google Services Framework
+- Google Play Store
+- Google app / Assistant
+- Google account/sync/backup/restore components
+- Google Location History
+- Android Auto
+- Digital Wellbeing
+- Google TTS
+- Gmail, YouTube, Maps, Photos, Drive, Calendar, Contacts and other Google apps
 
-Those packages can affect core Google functionality and therefore remain outside the quick Google preset.
+Removing Google Play services/GSF can make third-party apps that rely on Google APIs, FCM push notifications, Play Integrity, Google location APIs, or other Google services stop working. That is separate from protecting Android itself.
 
-## Build on Windows
+### Google-namespaced packages that should remain
 
-1. Install Flutter and enable Windows desktop development.
-2. Clone this repository.
-3. From PowerShell in the repository folder, run:
+Some stock Android builds use Google package names for Android platform components. Droid Purifier identifies these as **ANDROID CORE** and disables their checkboxes. Examples include:
 
-   `powershell -ExecutionPolicy Bypass -File scripts/bootstrap_windows.ps1`
+- `com.google.android.permissioncontroller`
+- `com.google.android.permission`
+- `com.google.android.documentsui`
+- `com.google.android.ext.services`
+- `com.google.android.ext.shared`
+- `com.google.android.modulemetadata`
+- `com.google.android.networkstack`
+- `com.google.android.captiveportallogin`
+- `com.google.android.webview`
+- `com.google.android.conscrypt`
+- `com.google.android.resolv`
+- Android Mainline/APEX modules detected dynamically
+- Google Android runtime-resource overlays
 
-4. Start the app:
+Keeping these does not mean the app failed to remove a normal Google application; many are implementations of Android platform functionality.
 
-   `flutter run -d windows`
+## Android version compatibility
 
-The bootstrap script generates the standard Flutter Windows runner and downloads Google Android platform-tools into `tools/platform-tools`.
+Droid Purifier is designed around ADB package-manager commands available on **Android 5.1+**, while adding special handling for the modular/Mainline/APEX architecture introduced on newer Android versions.
 
-## Build on macOS
+Compatibility strategy:
 
-1. Install Flutter and Xcode command-line tools.
-2. Clone this repository.
-3. Run:
+- **Older Android:** recognizes legacy packages such as Google Account Manager (`com.google.android.gsf.login`), Google Backup Transport, One-Time Initializer, Partner Setup, legacy Play Music and other older Google packages.
+- **Android 10:** explicitly protects the Google-build Permission Controller, DocumentsUI, ExtServices, Module Metadata and related overlays.
+- **Android 11 and later:** protects newer Mainline package aliases and detects APEX modules dynamically when supported by the device shell.
+- **Future Android releases:** unknown Google packages are never automatically removed, and packages detected as APEX are always protected.
 
-   `./scripts/bootstrap_macos.sh`
+OEM firmware can rename, add or remove packages, so no static package database can safely promise identical behavior on every device. The conservative unknown-package policy is intentional.
 
-4. Start the app:
+## Multi-select workflow
 
-   `flutter run -d macos`
+1. Connect an Android phone with USB debugging enabled.
+2. Choose **Recommended De-Google**, **Full De-Google**, or another curated preset.
+3. Review the selected packages.
+4. Manually review any packages marked **MANUAL REVIEW** if you want to go further.
+5. Keep **Back up APK files first** enabled when possible.
+6. Confirm the batch and remove the selected packages.
 
-## GitHub Actions releases
-
-The included workflow builds:
-
-- `DroidPurifier-Windows-x64.zip` — portable Flutter Windows release including ADB.
-- `DroidPurifier-Setup.exe` — single Windows installer including the Flutter application and ADB.
-- `DroidPurifier-macOS.zip` — macOS application bundle.
-
-Every push to `main` builds the Windows app automatically. You can also run the workflow manually from **Actions → Build desktop releases**, or push a version tag such as `v1.1.0`. Tagged builds are attached to the GitHub Release automatically.
+Presets select packages only; they never execute removals immediately.
 
 ## How removal works
 
-For each selected package, Droid Purifier can first query APK paths with:
-
-`adb shell pm path <package>`
-
-It pulls the base APK and any split APKs into the user's `DroidPurifier/Backups/<device-id>/<package>/` folder. It then performs:
+Droid Purifier uses a per-user uninstall:
 
 `adb shell pm uninstall -k --user 0 <package>`
 
-Because this is a per-user uninstall, the package normally remains on the system image. The Restore tab first attempts:
+This normally removes/disables the preinstalled package for Android user 0 rather than erasing the APK from a read-only system partition. A factory reset or firmware reinstallation can therefore bring preinstalled packages back.
 
-`adb shell cmd package install-existing --user 0 <package>`
+Before removal, Droid Purifier can run:
 
-and falls back to the local APK backup if needed.
+`adb shell pm path <package>`
 
-## Device preparation
+and pull the base APK plus split APKs to:
 
-1. Enable Developer options on Android.
-2. Enable USB debugging.
-3. Connect the phone by USB.
-4. Approve the computer's RSA debugging prompt.
-5. Open Droid Purifier and choose the detected device.
+`DroidPurifier/Backups/<device-id>/<package>/`
 
-## Safety model
+For restoration it first tries `cmd package install-existing`, then `pm install-existing`, then falls back to the local APK backup.
 
-The built-in database marks core packages such as Android System UI, Settings, Package Installer, and Phone Services as **Protected**. They cannot be selected from the UI. Google Play services and Google Services Framework are marked Critical and require typed confirmation if manually selected.
+## Windows build
 
-Unknown OEM-prefixed packages are marked Medium instead of being assumed safe. The preset database should continue to be expanded conservatively as device-specific packages are researched.
+1. Install Flutter with Windows desktop support.
+2. Clone this repository.
+3. Run:
+
+   `powershell -ExecutionPolicy Bypass -File scripts/bootstrap_windows.ps1`
+
+4. Start with:
+
+   `flutter run -d windows`
+
+Release builds bundle Android Platform Tools, so end users do not need to install ADB separately.
+
+## GitHub Actions
+
+The workflow runs Flutter analysis/tests and creates:
+
+- `DroidPurifier-Windows-x64.zip` — portable Windows build with ADB.
+- `DroidPurifier-Setup.exe` — Windows installer with ADB.
+- `DroidPurifier-macOS.zip` — macOS build on manual/tagged runs.
+
+Pushes to `main` automatically validate/build Windows. Tagged releases can attach the artifacts automatically.
 
 ## Project origin
 
-This is an independent implementation inspired by the workflow and safety ideas of the MIT-licensed [System Purifier](https://github.com/orailnoor/sys-purifier) project by `orailnoor`. Droid Purifier's bulk-selection UI, preset workflow, and source code in this repository are independently implemented.
+Droid Purifier is an independent implementation inspired by workflow/safety ideas from the MIT-licensed [System Purifier](https://github.com/orailnoor/sys-purifier) project. Droid Purifier's multi-select UI, De-Google policy, preset model and source code in this repository are independently implemented.
 
 ## License
 
