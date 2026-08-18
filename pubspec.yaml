@@ -1,7 +1,7 @@
 name: droid_purifier
-description: Cross-platform Android De-Google and debloat tool with safe bulk package removal over ADB.
+description: Offline-first Android De-Google and debloat assistant with dynamic safety analysis and rollback.
 publish_to: 'none'
-version: 1.2.1+4
+version: 1.3.0+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
