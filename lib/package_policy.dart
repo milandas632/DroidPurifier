@@ -1,254 +1,152 @@
-enum SafetyClass { knownRemovable, featureDependent, unknown, protected }
+import 'adb_service.dart';
+
+enum SafetyClass { removable, caution, review, protected }
+
+enum AppCategory { userApp, googleApp, oemApp, carrierApp, system, unknownVendor }
 
 enum DeGoogleTier { none, recommended, full, manual, core }
 
 class PackageInfo {
-  const PackageInfo(
-    this.name,
-    this.safety,
-    this.note, {
+  const PackageInfo({
+    required this.name,
+    required this.category,
+    required this.safety,
+    required this.note,
     this.deGoogleTier = DeGoogleTier.none,
     this.autoSelect = false,
+    this.dataWarning,
+    this.confidence = 'medium',
   });
 
   final String name;
+  final AppCategory category;
   final SafetyClass safety;
   final String note;
   final DeGoogleTier deGoogleTier;
   final bool autoSelect;
+  final String? dataWarning;
+  final String confidence;
 
   bool get protected => safety == SafetyClass.protected;
-  bool get googleRemovalCandidate =>
-      deGoogleTier == DeGoogleTier.recommended ||
-      deGoogleTier == DeGoogleTier.full ||
-      deGoogleTier == DeGoogleTier.manual;
+  bool get removable => safety == SafetyClass.removable;
 }
 
-/// Package policy deliberately fails safe.
-///
-/// A package is NEVER called "Known removable" merely because Droid Purifier
-/// does not recognise it. Dynamic device facts (APEX, overlay, current role,
-/// WebView provider, etc.) override this curated list and can protect a package
-/// on one phone even when it is removable on another.
+class _Rule {
+  const _Rule(
+    this.name,
+    this.safety,
+    this.note, {
+    this.category,
+    this.deGoogleTier = DeGoogleTier.none,
+    this.autoSelect = false,
+    this.dataWarning,
+  });
+  final String name;
+  final SafetyClass safety;
+  final String note;
+  final AppCategory? category;
+  final DeGoogleTier deGoogleTier;
+  final bool autoSelect;
+  final String? dataWarning;
+}
+
 class PackagePolicy {
-  static const Map<String, PackageInfo> exact = {
-    // Android framework / platform essentials.
-    'android': PackageInfo(
-      'Android Framework',
-      SafetyClass.protected,
-      'Core Android framework resources. Never remove.',
-    ),
-    'com.android.systemui': PackageInfo(
-      'Android System UI',
-      SafetyClass.protected,
-      'Required for the status bar, navigation and system interface.',
-    ),
-    'com.android.settings': PackageInfo(
-      'Android Settings',
-      SafetyClass.protected,
-      'Required to manage the device.',
-    ),
-    'com.android.phone': PackageInfo(
-      'Android Phone Services',
-      SafetyClass.protected,
-      'Core telephony service.',
-    ),
-    'com.android.providers.settings': PackageInfo(
-      'Settings Provider',
-      SafetyClass.protected,
-      'Core Android settings storage.',
-    ),
-    'com.android.packageinstaller': PackageInfo(
-      'Android Package Installer',
-      SafetyClass.protected,
-      'Required to install and manage applications.',
-    ),
-    'com.google.android.packageinstaller': PackageInfo(
-      'Android Package Installer (Google build)',
-      SafetyClass.protected,
-      'Android package-management component, not Google bloatware.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.permissioncontroller': PackageInfo(
-      'Android Permission Controller',
-      SafetyClass.protected,
-      'Manages Android runtime permissions and roles.',
-    ),
-    'com.google.android.permissioncontroller': PackageInfo(
-      'Android Permission Controller (Google build)',
-      SafetyClass.protected,
-      'Android permission infrastructure. Keep it when De-Googling.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.permission': PackageInfo(
-      'Android Permission Mainline module',
-      SafetyClass.protected,
-      'Modern Android permission framework module.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.documentsui': PackageInfo(
-      'Android DocumentsUI',
-      SafetyClass.protected,
-      'Android system file/document picker.',
-    ),
-    'com.google.android.documentsui': PackageInfo(
-      'Android DocumentsUI (Google build)',
-      SafetyClass.protected,
-      'Android system file/document picker, not a Google consumer app.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.ext.services': PackageInfo(
-      'Android ExtServices',
-      SafetyClass.protected,
-      'Android framework extension services.',
-    ),
-    'com.google.android.ext.services': PackageInfo(
-      'Android ExtServices (Google build)',
-      SafetyClass.protected,
-      'Android framework/Mainline service.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.ext.shared': PackageInfo(
-      'Android ExtShared',
-      SafetyClass.protected,
-      'Shared Android framework extension library.',
-    ),
-    'com.google.android.ext.shared': PackageInfo(
-      'Android ExtShared (Google build)',
-      SafetyClass.protected,
-      'Shared Android framework library.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.modulemetadata': PackageInfo(
-      'Android Module Metadata',
-      SafetyClass.protected,
-      'Tracks Android modular-system metadata.',
-    ),
-    'com.google.android.modulemetadata': PackageInfo(
-      'Android Module Metadata (Google build)',
-      SafetyClass.protected,
-      'Android modular-system metadata component.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.networkstack': PackageInfo(
-      'Android Network Stack',
-      SafetyClass.protected,
-      'Core Android networking component.',
-    ),
-    'com.google.android.networkstack': PackageInfo(
-      'Android Network Stack (Google build)',
-      SafetyClass.protected,
-      'Core Android networking/Mainline component.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.networkstack.permissionconfig': PackageInfo(
-      'Network Stack Permission Configuration',
-      SafetyClass.protected,
-      'Permission configuration for Android networking.',
-    ),
-    'com.google.android.networkstack.permissionconfig': PackageInfo(
-      'Network Stack Permission Configuration (Google build)',
-      SafetyClass.protected,
-      'Android networking permission configuration.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.captiveportallogin': PackageInfo(
-      'Captive Portal Login',
-      SafetyClass.protected,
-      'Used to sign into Wi-Fi captive portals.',
-    ),
-    'com.google.android.captiveportallogin': PackageInfo(
-      'Captive Portal Login (Google build)',
-      SafetyClass.protected,
-      'Android networking component for Wi-Fi sign-in pages.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.google.android.webview': PackageInfo(
-      'Android System WebView (Google provider)',
-      SafetyClass.protected,
-      'Many apps need a working WebView provider. Replace it first.',
-      deGoogleTier: DeGoogleTier.core,
-    ),
-    'com.android.webview': PackageInfo(
-      'Android System WebView',
-      SafetyClass.protected,
-      'Many apps need a working WebView provider.',
-    ),
+  static const Set<String> _coreAndroid = {
+    'android',
+    'com.android.systemui',
+    'com.android.settings',
+    'com.android.phone',
+    'com.android.providers.settings',
+    'com.android.packageinstaller',
+    'com.google.android.packageinstaller',
+    'com.android.permissioncontroller',
+    'com.google.android.permissioncontroller',
+    'com.google.android.permission',
+    'com.android.documentsui',
+    'com.google.android.documentsui',
+    'com.android.ext.services',
+    'com.google.android.ext.services',
+    'com.android.ext.shared',
+    'com.google.android.ext.shared',
+    'com.android.modulemetadata',
+    'com.google.android.modulemetadata',
+    'com.android.networkstack',
+    'com.google.android.networkstack',
+    'com.android.networkstack.permissionconfig',
+    'com.google.android.networkstack.permissionconfig',
+    'com.android.captiveportallogin',
+    'com.google.android.captiveportallogin',
+    'com.android.webview',
+    'com.google.android.webview',
+    'com.google.android.conscrypt',
+    'com.google.android.resolv',
+    'com.google.android.cellbroadcast',
+    'com.google.android.tzdata2',
+    'com.google.android.media',
+    'com.google.android.media.swcodec',
+    'com.google.android.mediaprovider',
+    'com.google.android.sdkext',
+    'com.google.android.os.statsd',
+    'com.google.android.tethering',
+    'com.google.android.wifi',
+    'com.google.android.ipsec',
+    'com.google.android.neuralnetworks',
+    'com.google.android.art',
+    'com.google.android.adbd',
+  };
 
-    // Modern Android Mainline aliases. Dynamic APEX detection adds another
-    // layer, so future modules remain protected even if absent from this list.
-    'com.google.android.conscrypt': PackageInfo('Android Conscrypt module', SafetyClass.protected, 'Core TLS/cryptography module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.resolv': PackageInfo('Android DNS Resolver module', SafetyClass.protected, 'Core DNS/networking module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.cellbroadcast': PackageInfo('Android Cell Broadcast module', SafetyClass.protected, 'Emergency/system cell broadcast module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.tzdata2': PackageInfo('Android Time Zone Data module', SafetyClass.protected, 'System time-zone data module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.media': PackageInfo('Android Media module', SafetyClass.protected, 'Core Android media framework module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.media.swcodec': PackageInfo('Android Media Codec module', SafetyClass.protected, 'Core Android software codecs.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.mediaprovider': PackageInfo('Android MediaProvider module', SafetyClass.protected, 'Core Android media provider.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.sdkext': PackageInfo('Android SDK Extensions module', SafetyClass.protected, 'Android SDK extension module.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.os.statsd': PackageInfo('Android statsd module', SafetyClass.protected, 'Android platform statistics infrastructure.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.tethering': PackageInfo('Android Tethering module', SafetyClass.protected, 'Hotspot/tethering implementation.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.wifi': PackageInfo('Android Wi-Fi module', SafetyClass.protected, 'Core Android Wi-Fi implementation.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.ipsec': PackageInfo('Android IPsec module', SafetyClass.protected, 'Core IPsec/IKE implementation.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.neuralnetworks': PackageInfo('Android NNAPI module', SafetyClass.protected, 'Android neural-networks runtime.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.art': PackageInfo('Android Runtime module', SafetyClass.protected, 'Android Runtime (ART). Never remove.', deGoogleTier: DeGoogleTier.core),
-    'com.google.android.adbd': PackageInfo('Android ADB module', SafetyClass.protected, 'Android debugging daemon module.', deGoogleTier: DeGoogleTier.core),
-
-    // Google consumer apps: explicitly curated and appropriate for the
-    // Recommended De-Google preset when they are not a critical current role.
-    'com.google.android.youtube': PackageInfo('YouTube', SafetyClass.knownRemovable, 'Google YouTube app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.gm': PackageInfo('Gmail', SafetyClass.knownRemovable, 'Google Gmail app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.apps.docs': PackageInfo('Google Drive', SafetyClass.knownRemovable, 'Google Drive app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.apps.photos': PackageInfo('Google Photos', SafetyClass.knownRemovable, 'Google Photos app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.videos': PackageInfo('Google TV / Play Movies', SafetyClass.knownRemovable, 'Google video/TV app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.music': PackageInfo('Google Play Music', SafetyClass.knownRemovable, 'Legacy Google music app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.ar.lens': PackageInfo('Google Lens', SafetyClass.knownRemovable, 'Google Lens app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.feedback': PackageInfo('Google Feedback', SafetyClass.knownRemovable, 'Google feedback/reporting component.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.apps.tachyon': PackageInfo('Google Meet / Duo', SafetyClass.knownRemovable, 'Google video calling app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.apps.podcasts': PackageInfo('Google Podcasts', SafetyClass.knownRemovable, 'Legacy Google Podcasts app.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
-    'com.google.android.apps.maps': PackageInfo('Google Maps', SafetyClass.featureDependent, 'Navigation/location features are removed. Install an alternative if needed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-
-    // Google framework/services. Full De-Google may select these, but the UI
-    // must explain the feature impact and third-party compatibility impact.
-    'com.google.android.gms': PackageInfo('Google Play Services', SafetyClass.featureDependent, 'Removing it can break apps that use Google APIs, FCM or Play Integrity.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.gsf': PackageInfo('Google Services Framework', SafetyClass.featureDependent, 'Core Google account/service framework. Android can run without it, but Google-dependent apps may fail.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.gsf.login': PackageInfo('Google Account Manager (legacy)', SafetyClass.featureDependent, 'Legacy Google account sign-in component.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.android.vending': PackageInfo('Google Play Store', SafetyClass.featureDependent, 'Google app store. Install another app source before removing if desired.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.googlequicksearchbox': PackageInfo('Google App / Assistant', SafetyClass.featureDependent, 'Google Search and Assistant integration.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.apps.restore': PackageInfo('Google Restore', SafetyClass.featureDependent, 'Google device restore functionality.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.backuptransport': PackageInfo('Google Backup Transport', SafetyClass.featureDependent, 'Legacy Google cloud backup transport.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.apps.turbo': PackageInfo('Device Health Services', SafetyClass.featureDependent, 'Google battery/device-health prediction features.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.partnersetup': PackageInfo('Google Partner Setup', SafetyClass.featureDependent, 'Google partner/setup integration.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.onetimeinitializer': PackageInfo('Google One-Time Initializer', SafetyClass.featureDependent, 'Google first-run initialization component.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.syncadapters.calendar': PackageInfo('Google Calendar Sync', SafetyClass.featureDependent, 'Google calendar account sync.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.syncadapters.contacts': PackageInfo('Google Contacts Sync', SafetyClass.featureDependent, 'Google contacts account sync.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.gms.location.history': PackageInfo('Google Location History', SafetyClass.featureDependent, 'Google location-history service.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.projection.gearhead': PackageInfo('Android Auto', SafetyClass.featureDependent, 'Android Auto will stop working.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.printservice.recommendation': PackageInfo('Google Print Recommendation', SafetyClass.featureDependent, 'Printer recommendation service.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.apps.wellbeing': PackageInfo('Digital Wellbeing', SafetyClass.featureDependent, 'Digital Wellbeing features will be removed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.tts': PackageInfo('Google Text-to-Speech', SafetyClass.featureDependent, 'Install another TTS engine first if speech output is needed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.configupdater': PackageInfo('Google Config Updater', SafetyClass.featureDependent, 'Google-delivered system configuration updates will stop.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-    'com.google.android.setupwizard': PackageInfo('Google Setup Wizard', SafetyClass.featureDependent, 'Only remove after initial device setup has completed.', deGoogleTier: DeGoogleTier.full, autoSelect: true),
-
-    // Role-sensitive Google apps. Never auto-select: the dynamic scanner may
-    // protect them if currently used as launcher/IME/dialer/SMS/WebView.
-    'com.google.android.inputmethod.latin': PackageInfo('Gboard', SafetyClass.featureDependent, 'Keyboard. Install/select another keyboard before removing.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.dialer': PackageInfo('Google Phone', SafetyClass.featureDependent, 'Dialer. Select another dialer before removing.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.apps.messaging': PackageInfo('Google Messages', SafetyClass.featureDependent, 'SMS/RCS app. Select another SMS app before removing.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.GoogleCamera': PackageInfo('Google Camera', SafetyClass.featureDependent, 'Camera app. Keep another camera app available.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.apps.nexuslauncher': PackageInfo('Pixel Launcher', SafetyClass.featureDependent, 'Launcher. Install/select another launcher before removing.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.marvin.talkback': PackageInfo('TalkBack', SafetyClass.featureDependent, 'Accessibility screen reader. Do not remove if you rely on it.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.apps.authenticator2': PackageInfo('Google Authenticator', SafetyClass.featureDependent, 'May contain access to 2FA codes; migrate first.', deGoogleTier: DeGoogleTier.manual),
-    'com.google.android.ims': PackageInfo('Carrier Services', SafetyClass.featureDependent, 'Can affect carrier messaging/RCS features.', deGoogleTier: DeGoogleTier.manual),
-    'com.android.chrome': PackageInfo('Google Chrome', SafetyClass.featureDependent, 'Browser. Install another browser first if this is your only browser.', deGoogleTier: DeGoogleTier.manual),
-
-    // Common explicitly-known OEM/social bloat. This is intentionally small;
-    // unknown OEM packages stay Unknown instead of being guessed safe.
-    'com.facebook.katana': PackageInfo('Facebook', SafetyClass.knownRemovable, 'Facebook consumer app.', autoSelect: true),
-    'com.facebook.appmanager': PackageInfo('Meta App Manager', SafetyClass.knownRemovable, 'Meta/Facebook preload manager.', autoSelect: true),
-    'com.facebook.services': PackageInfo('Meta Services', SafetyClass.knownRemovable, 'Meta/Facebook preload service.', autoSelect: true),
-    'com.facebook.system': PackageInfo('Meta App Installer', SafetyClass.knownRemovable, 'Meta/Facebook preload installer.', autoSelect: true),
-    'com.miui.analytics': PackageInfo('MIUI Analytics', SafetyClass.knownRemovable, 'Xiaomi analytics component.', autoSelect: true),
-    'com.miui.msa.global': PackageInfo('MIUI System Ads', SafetyClass.knownRemovable, 'Xiaomi advertising service.', autoSelect: true),
+  static const Map<String, _Rule> _known = {
+    'com.google.android.youtube': _Rule('YouTube', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.gm': _Rule('Gmail', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.docs': _Rule('Google Drive', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.photos': _Rule('Google Photos', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.maps': _Rule('Google Maps', SafetyClass.removable, 'Navigation app. Keep another maps app if needed.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.tachyon': _Rule('Google Meet', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.podcasts': _Rule('Google Podcasts', SafetyClass.removable, 'Legacy Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.videos': _Rule('Google TV', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.music': _Rule('Google Play Music', SafetyClass.removable, 'Legacy Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.ar.lens': _Rule('Google Lens', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.translate': _Rule('Google Translate', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.chromecast.app': _Rule('Google Home', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.subscriptions.red': _Rule('Google One', SafetyClass.removable, 'Google consumer app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.apps.walletnfcrel': _Rule('Google Wallet', SafetyClass.caution, 'Wallet/payment app. Review local cards and passes before removal.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual, dataWarning: 'Check cards, passes and locally stored wallet data before removal.'),
+    'com.google.android.apps.authenticator2': _Rule('Google Authenticator', SafetyClass.removable, 'Authenticator app; Android itself does not depend on it.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual, dataWarning: 'Export or migrate your 2FA accounts before removal.'),
+    'com.android.chrome': _Rule('Google Chrome', SafetyClass.removable, 'Google browser app.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.googlequicksearchbox': _Rule('Google App / Assistant', SafetyClass.caution, 'Removing it disables Google Search/Assistant integration.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.feedback': _Rule('Google Feedback', SafetyClass.removable, 'Google feedback/reporting component.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.recommended, autoSelect: true),
+    'com.google.android.gms': _Rule('Google Play Services', SafetyClass.caution, 'Many third-party apps depend on Google APIs, FCM or Play Integrity.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gsf': _Rule('Google Services Framework', SafetyClass.caution, 'Google account/service framework. Google-dependent apps may fail.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gsf.login': _Rule('Google Account Manager', SafetyClass.caution, 'Google account sign-in component.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.android.vending': _Rule('Google Play Store', SafetyClass.caution, 'Install another trusted app source before removing if desired.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.restore': _Rule('Google Restore', SafetyClass.caution, 'Google device restore functionality.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.backuptransport': _Rule('Google Backup Transport', SafetyClass.caution, 'Google cloud backup transport.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.turbo': _Rule('Device Health Services', SafetyClass.caution, 'Google battery/device-health prediction features.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.partnersetup': _Rule('Google Partner Setup', SafetyClass.caution, 'Google partner/setup integration.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.onetimeinitializer': _Rule('Google One-Time Initializer', SafetyClass.caution, 'Google first-run initialization component.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.syncadapters.calendar': _Rule('Google Calendar Sync', SafetyClass.caution, 'Google calendar account sync.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.syncadapters.contacts': _Rule('Google Contacts Sync', SafetyClass.caution, 'Google contacts account sync.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.gms.location.history': _Rule('Google Location History', SafetyClass.caution, 'Google location-history service.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.projection.gearhead': _Rule('Android Auto', SafetyClass.caution, 'Android Auto will stop working.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.apps.wellbeing': _Rule('Digital Wellbeing', SafetyClass.caution, 'Digital Wellbeing features will be removed.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.tts': _Rule('Google Text-to-Speech', SafetyClass.caution, 'Install another TTS engine first if speech output is needed.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.configupdater': _Rule('Google Config Updater', SafetyClass.caution, 'Google-delivered configuration updates will stop.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.setupwizard': _Rule('Google Setup Wizard', SafetyClass.caution, 'Only remove after initial device setup has completed.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.full, autoSelect: true),
+    'com.google.android.inputmethod.latin': _Rule('Gboard', SafetyClass.caution, 'Install and enable another keyboard first.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.dialer': _Rule('Google Phone', SafetyClass.caution, 'Select another dialer first.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.apps.messaging': _Rule('Google Messages', SafetyClass.caution, 'Select another SMS app first.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.GoogleCamera': _Rule('Google Camera', SafetyClass.removable, 'Camera app. Keep another camera app available.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.apps.nexuslauncher': _Rule('Pixel Launcher', SafetyClass.caution, 'Install/select another launcher first.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.marvin.talkback': _Rule('TalkBack', SafetyClass.caution, 'Do not remove if you rely on screen-reading accessibility.', category: AppCategory.googleApp, deGoogleTier: DeGoogleTier.manual),
+    'com.google.android.ims': _Rule('Carrier Services', SafetyClass.caution, 'Can affect RCS/carrier messaging features.', category: AppCategory.carrierApp, deGoogleTier: DeGoogleTier.manual),
+    'com.facebook.katana': _Rule('Facebook', SafetyClass.removable, 'Consumer app.', category: AppCategory.userApp, autoSelect: true),
+    'com.facebook.appmanager': _Rule('Meta App Manager', SafetyClass.removable, 'Meta/Facebook preload manager.', category: AppCategory.oemApp, autoSelect: true),
+    'com.facebook.services': _Rule('Meta Services', SafetyClass.removable, 'Meta/Facebook preload service.', category: AppCategory.oemApp, autoSelect: true),
+    'com.facebook.system': _Rule('Meta App Installer', SafetyClass.removable, 'Meta/Facebook preload installer.', category: AppCategory.oemApp, autoSelect: true),
+    'com.miui.analytics': _Rule('MIUI Analytics', SafetyClass.removable, 'Xiaomi analytics component.', category: AppCategory.oemApp, autoSelect: true),
+    'com.miui.msa.global': _Rule('MIUI System Ads', SafetyClass.removable, 'Xiaomi advertising service.', category: AppCategory.oemApp, autoSelect: true),
+    'com.miui.daemon': _Rule('MIUI Daemon', SafetyClass.caution, 'Xiaomi telemetry/system diagnostics component.', category: AppCategory.oemApp),
+    'com.samsung.android.game.gamehome': _Rule('Samsung Gaming Hub', SafetyClass.removable, 'Optional Samsung gaming app.', category: AppCategory.oemApp, autoSelect: true),
+    'com.samsung.android.app.spage': _Rule('Samsung Free', SafetyClass.removable, 'Optional Samsung content feed.', category: AppCategory.oemApp, autoSelect: true),
   };
 
   static bool isGoogleRelated(String packageName) =>
@@ -256,109 +154,161 @@ class PackagePolicy {
       packageName == 'com.android.vending' ||
       packageName == 'com.android.chrome';
 
+  static bool _matchesAnyPrefix(String value, Iterable<String> prefixes) =>
+      prefixes.any((prefix) => value.startsWith(prefix));
+
+  static Set<String> _oemPrefixes(DeviceInfo device) {
+    final maker = '${device.manufacturer} ${device.brand} ${device.romName}'.toLowerCase();
+    if (maker.contains('oneplus') || maker.contains('oplus') || maker.contains('oppo')) {
+      return const {'com.oneplus.', 'net.oneplus.', 'com.oplus.', 'com.oppo.', 'com.coloros.', 'com.heytap.'};
+    }
+    if (maker.contains('realme')) return const {'com.realme.', 'com.oplus.', 'com.coloros.', 'com.heytap.'};
+    if (maker.contains('xiaomi') || maker.contains('redmi') || maker.contains('poco') || maker.contains('miui') || maker.contains('hyperos')) {
+      return const {'com.miui.', 'com.xiaomi.', 'com.mi.', 'com.mi.android.', 'com.xiaomi.mipicks'};
+    }
+    if (maker.contains('samsung')) return const {'com.samsung.', 'com.sec.', 'com.samsung.android.'};
+    if (maker.contains('motorola') || maker.contains('lenovo')) return const {'com.motorola.', 'com.lenovo.'};
+    if (maker.contains('vivo') || maker.contains('iqoo')) return const {'com.vivo.', 'com.iqoo.', 'com.bbk.'};
+    if (maker.contains('nothing')) return const {'com.nothing.'};
+    if (maker.contains('asus')) return const {'com.asus.'};
+    if (maker.contains('sony')) return const {'com.sonymobile.', 'com.sony.'};
+    if (maker.contains('huawei') || maker.contains('honor')) return const {'com.huawei.', 'com.hihonor.'};
+    return const <String>{};
+  }
+
+  static bool isOemPackage(String packageName, DeviceInfo device) =>
+      _matchesAnyPrefix(packageName, _oemPrefixes(device));
+
+  static AppCategory _category(String packageName, DeviceInfo device, PackageMetadata meta) {
+    if (isGoogleRelated(packageName)) return AppCategory.googleApp;
+    if (isOemPackage(packageName, device)) return AppCategory.oemApp;
+    if (!meta.isSystem) return AppCategory.userApp;
+    if (packageName.startsWith('com.android.') || packageName.startsWith('android.')) return AppCategory.system;
+    if (packageName.contains('carrier') || packageName.contains('ims')) return AppCategory.carrierApp;
+    return AppCategory.unknownVendor;
+  }
+
+  static bool _deepSystemSignal(PackageMetadata meta) {
+    const protectedServicePermissions = {
+      'android.permission.BIND_INPUT_METHOD',
+      'android.permission.BIND_ACCESSIBILITY_SERVICE',
+      'android.permission.BIND_VPN_SERVICE',
+      'android.permission.BIND_AUTOFILL_SERVICE',
+    };
+    return meta.privileged ||
+        meta.deviceAdmin ||
+        meta.servicePermissions.any(protectedServicePermissions.contains);
+  }
+
   static PackageInfo classify(
     String packageName, {
-    required bool isSystem,
+    required DeviceInfo device,
+    required PackageMetadata metadata,
     required bool isApex,
     required bool isOverlay,
     required bool isCriticalRole,
     required bool isCurrentWebView,
     required bool setupComplete,
   }) {
-    final base = exact[packageName];
+    final rule = _known[packageName];
+    final label = metadata.label.trim().isEmpty || metadata.label == packageName
+        ? (rule?.name ?? packageName)
+        : metadata.label.trim();
+    final category = rule?.category ?? _category(packageName, device, metadata);
 
-    if (packageName == 'android') return exact['android']!;
-    if (isApex) {
+    if (packageName == 'android' || _coreAndroid.contains(packageName)) {
       return PackageInfo(
-        base?.name ?? packageName,
-        SafetyClass.protected,
-        'Detected as an Android APEX/Mainline package on this device.',
+        name: label,
+        category: AppCategory.system,
+        safety: SafetyClass.protected,
+        note: 'Android core/platform component. Droid Purifier will not remove it in normal mode.',
         deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none,
+        confidence: 'high',
       );
+    }
+    if (isApex) {
+      return PackageInfo(name: label, category: AppCategory.system, safety: SafetyClass.protected, note: 'Detected as an Android APEX/Mainline package on this device.', deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none, confidence: 'high');
     }
     if (isOverlay) {
-      return PackageInfo(
-        base?.name ?? packageName,
-        SafetyClass.protected,
-        'Detected as an Android runtime resource overlay on this device.',
-        deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none,
-      );
+      return PackageInfo(name: label, category: AppCategory.system, safety: SafetyClass.protected, note: 'Detected as a runtime resource overlay used by the current ROM.', deGoogleTier: isGoogleRelated(packageName) ? DeGoogleTier.core : DeGoogleTier.none, confidence: 'high');
     }
     if (isCriticalRole) {
-      return PackageInfo(
-        base?.name ?? packageName,
-        SafetyClass.protected,
-        'Currently provides a critical device role (launcher, keyboard, dialer, SMS or accessibility). Choose a replacement first.',
-        deGoogleTier: base?.deGoogleTier ?? DeGoogleTier.none,
-      );
+      return PackageInfo(name: label, category: category, safety: SafetyClass.protected, note: 'This package currently provides a critical role on this phone. Choose a replacement first.', deGoogleTier: rule?.deGoogleTier ?? (isGoogleRelated(packageName) ? DeGoogleTier.manual : DeGoogleTier.none), confidence: 'high');
     }
     if (isCurrentWebView) {
-      return PackageInfo(
-        base?.name ?? packageName,
-        SafetyClass.protected,
-        'Current WebView provider. Select another working WebView provider before removal.',
-        deGoogleTier: base?.deGoogleTier ?? DeGoogleTier.core,
-      );
+      return PackageInfo(name: label, category: category, safety: SafetyClass.protected, note: 'Current Android WebView provider. Select another working WebView provider first.', deGoogleTier: rule?.deGoogleTier ?? DeGoogleTier.core, confidence: 'high');
     }
     if (packageName == 'com.google.android.setupwizard' && !setupComplete) {
-      return const PackageInfo(
-        'Google Setup Wizard',
-        SafetyClass.protected,
-        'Device setup is not complete. Setup Wizard is temporarily protected.',
-        deGoogleTier: DeGoogleTier.core,
+      return PackageInfo(name: label, category: AppCategory.googleApp, safety: SafetyClass.protected, note: 'Device setup is not complete. Setup Wizard is temporarily protected.', deGoogleTier: DeGoogleTier.core, confidence: 'high');
+    }
+
+    if (rule != null) {
+      return PackageInfo(
+        name: label,
+        category: rule.category ?? category,
+        safety: rule.safety,
+        note: rule.note,
+        deGoogleTier: rule.deGoogleTier,
+        autoSelect: rule.autoSelect,
+        dataWarning: rule.dataWarning,
+        confidence: 'high',
       );
     }
-    if (base != null) return base;
 
-    // Generic namespaces are NEVER trusted as removable.
-    if (packageName.startsWith('android.') ||
-        packageName.startsWith('com.android.') ||
-        packageName.startsWith('com.google.android.overlay.') ||
-        packageName.contains('.overlay.') ||
-        packageName.endsWith('.overlay')) {
+    if (!metadata.isSystem) {
+      final isDataSensitive = metadata.hasAutofillService ||
+          packageName.toLowerCase().contains('authenticator') ||
+          label.toLowerCase().contains('authenticator') ||
+          label.toLowerCase().contains('password') ||
+          label.toLowerCase().contains('wallet');
       return PackageInfo(
-        packageName,
-        SafetyClass.unknown,
-        'Unverified Android/OEM system package. Droid Purifier will not bulk-select it.',
+        name: label,
+        category: isGoogleRelated(packageName) ? AppCategory.googleApp : AppCategory.userApp,
+        safety: SafetyClass.removable,
+        note: 'Detected dynamically as a normal user-installed app with no protected phone role.',
+        deGoogleTier: isGoogleRelated(packageName)
+            ? (isDataSensitive ? DeGoogleTier.manual : DeGoogleTier.recommended)
+            : DeGoogleTier.none,
+        autoSelect: isGoogleRelated(packageName) && !isDataSensitive,
+        dataWarning: isDataSensitive ? 'Back up or migrate important local account/data information before removal.' : null,
+        confidence: 'high',
       );
     }
 
     if (isGoogleRelated(packageName)) {
-      return PackageInfo(
-        packageName,
-        SafetyClass.unknown,
-        'Unverified Google-namespaced package. Not automatically selected.',
-        deGoogleTier: DeGoogleTier.manual,
-      );
+      if (metadata.hasLauncher && !_deepSystemSignal(metadata)) {
+        return PackageInfo(name: label, category: AppCategory.googleApp, safety: SafetyClass.removable, note: 'Detected dynamically as a user-facing Google app. No critical Android role was detected.', deGoogleTier: DeGoogleTier.recommended, autoSelect: true, confidence: 'medium-high');
+      }
+      return PackageInfo(name: label, category: AppCategory.googleApp, safety: SafetyClass.review, note: 'Google system/background package with an unverified purpose. Review before removing.', deGoogleTier: DeGoogleTier.manual, confidence: 'medium');
     }
 
-    if (isSystem) {
-      return PackageInfo(
-        packageName,
-        SafetyClass.unknown,
-        'Unverified system/OEM package. Not automatically selected.',
-      );
+    if (isOemPackage(packageName, device)) {
+      if (metadata.hasLauncher && !_deepSystemSignal(metadata)) {
+        return PackageInfo(name: label, category: AppCategory.oemApp, safety: SafetyClass.caution, note: 'Detected as a user-facing preinstalled ${device.manufacturer} app. Android core should remain available, but an OEM feature may be removed.', confidence: 'medium');
+      }
+      return PackageInfo(name: label, category: AppCategory.oemApp, safety: SafetyClass.review, note: 'Detected as an OEM system/background package. Its dependency is not verified, so Droid Purifier will not bulk-select it.', confidence: 'medium');
     }
 
-    return PackageInfo(
-      packageName,
-      SafetyClass.featureDependent,
-      'User-installed app. Android should remain functional, but the app and its features will be unavailable.',
-    );
+    if (packageName.startsWith('com.android.') ||
+        packageName.startsWith('android.') ||
+        metadata.privileged ||
+        _deepSystemSignal(metadata)) {
+      return PackageInfo(name: label, category: AppCategory.system, safety: SafetyClass.review, note: 'Unverified Android/system component. It is intentionally left for manual review.', confidence: 'medium');
+    }
+
+    return PackageInfo(name: label, category: AppCategory.unknownVendor, safety: SafetyClass.review, note: 'Preinstalled package with insufficient evidence for safe bulk removal.', confidence: 'low');
   }
 
   static bool recommendedCandidate(PackageInfo info) =>
       info.deGoogleTier == DeGoogleTier.recommended &&
-      info.safety == SafetyClass.knownRemovable &&
+      info.safety == SafetyClass.removable &&
       info.autoSelect;
 
   static bool fullCandidate(PackageInfo info) =>
-      (info.deGoogleTier == DeGoogleTier.recommended ||
-          info.deGoogleTier == DeGoogleTier.full) &&
+      (info.deGoogleTier == DeGoogleTier.recommended || info.deGoogleTier == DeGoogleTier.full) &&
       !info.protected &&
-      info.safety != SafetyClass.unknown &&
+      info.safety != SafetyClass.review &&
       info.autoSelect;
 
-  static bool knownRemovableCandidate(PackageInfo info) =>
-      info.safety == SafetyClass.knownRemovable && info.autoSelect;
+  static bool removableCandidate(PackageInfo info) => info.safety == SafetyClass.removable;
 }

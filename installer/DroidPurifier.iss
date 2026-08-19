@@ -1,6 +1,6 @@
 #define MyAppName "Droid Purifier"
-#define MyAppVersion "1.3.0"
-#define MyAppPublisher "Droid Purifier"
+#define MyAppVersion "1.4.0"
+#define MyAppPublisher "TechyDruid"
 #define MyAppExeName "droid_purifier.exe"
 #ifndef BuildDir
   #define BuildDir "..\build\windows\x64\runner\Release"
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\Droid Purifier
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=DroidPurifier-Setup
+OutputBaseFilename=DroidPurifier-1.4.0-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=1.3.0.0
+VersionInfoVersion=1.4.0.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}

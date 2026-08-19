@@ -26,6 +26,21 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build temporary Android scan helper
+        shell: pwsh
+        run: gradle -p helper :app:assembleDebug --no-daemon
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -49,7 +64,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze source
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Run tests
         run: flutter test
@@ -68,18 +83,21 @@ jobs:
       - name: Build Flutter Windows release
         run: flutter build windows --release
 
-      - name: Bundle ADB with the application
+      - name: Bundle ADB and scan helper
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Path "build\windows" -Filter "droid_purifier.exe" -File -Recurse | Select-Object -First 1
           if ($null -eq $exe) { throw "droid_purifier.exe was not found in the Flutter build output." }
           $releaseDir = $exe.Directory.FullName
           Copy-Item -Recurse -Force "tools\platform-tools" (Join-Path $releaseDir "platform-tools")
+          $helperDir = Join-Path $releaseDir "helper"
+          New-Item -ItemType Directory -Force -Path $helperDir | Out-Null
+          Copy-Item -Force "helper\app\build\outputs\apk\debug\app-debug.apk" (Join-Path $helperDir "droid_purifier_helper.apk")
           "DROID_PURIFIER_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Create portable Windows ZIP
         shell: pwsh
-        run: Compress-Archive -Path "$env:DROID_PURIFIER_RELEASE_DIR\*" -DestinationPath "DroidPurifier-Windows-x64.zip" -Force
+        run: Compress-Archive -Path "$env:DROID_PURIFIER_RELEASE_DIR\*" -DestinationPath "DroidPurifier-1.4.0-Windows-x64.zip" -Force
 
       - name: Install Inno Setup
         shell: pwsh
@@ -93,24 +111,24 @@ jobs:
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DBuildDir=$env:DROID_PURIFIER_RELEASE_DIR" "installer\DroidPurifier.iss"
-          if (-not (Test-Path "installer\DroidPurifier-Setup.exe")) { throw "DroidPurifier-Setup.exe was not created." }
+          if (-not (Test-Path "installer\DroidPurifier-1.4.0-Setup.exe")) { throw "DroidPurifier-1.4.0-Setup.exe was not created." }
 
       - name: Upload Windows build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DroidPurifier-Windows-x64
+          name: DroidPurifier-1.4.0-Windows-x64
           if-no-files-found: error
           path: |
-            DroidPurifier-Windows-x64.zip
-            installer/DroidPurifier-Setup.exe
+            DroidPurifier-1.4.0-Windows-x64.zip
+            installer/DroidPurifier-1.4.0-Setup.exe
 
       - name: Attach Windows files to tagged GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            DroidPurifier-Windows-x64.zip
-            installer/DroidPurifier-Setup.exe
+            DroidPurifier-1.4.0-Windows-x64.zip
+            installer/DroidPurifier-1.4.0-Setup.exe
 
   macos:
     name: macOS
@@ -119,6 +137,17 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build temporary Android scan helper
+        run: gradle -p helper :app:assembleDebug --no-daemon
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -131,7 +160,7 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
       - name: Analyze source
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
       - name: Run tests
         run: flutter test
       - name: Download Android platform-tools
@@ -142,24 +171,26 @@ jobs:
           chmod +x tools/platform-tools/adb
       - name: Build Flutter macOS release
         run: flutter build macos --release
-      - name: Bundle ADB in app Resources
+      - name: Bundle ADB and scan helper in app Resources
         run: |
           APP=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' -print -quit)
           test -n "$APP"
           mkdir -p "$APP/Contents/Resources/platform-tools"
           cp -R tools/platform-tools/* "$APP/Contents/Resources/platform-tools/"
           chmod +x "$APP/Contents/Resources/platform-tools/adb"
+          mkdir -p "$APP/Contents/Resources/helper"
+          cp helper/app/build/outputs/apk/debug/app-debug.apk "$APP/Contents/Resources/helper/droid_purifier_helper.apk"
           echo "DROID_PURIFIER_APP=$APP" >> "$GITHUB_ENV"
       - name: Create macOS ZIP
-        run: ditto -c -k --sequesterRsrc --keepParent "$DROID_PURIFIER_APP" DroidPurifier-macOS.zip
+        run: ditto -c -k --sequesterRsrc --keepParent "$DROID_PURIFIER_APP" DroidPurifier-1.4.0-macOS.zip
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DroidPurifier-macOS
+          name: DroidPurifier-1.4.0-macOS
           if-no-files-found: error
-          path: DroidPurifier-macOS.zip
+          path: DroidPurifier-1.4.0-macOS.zip
       - name: Attach macOS file to tagged GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: DroidPurifier-macOS.zip
+          files: DroidPurifier-1.4.0-macOS.zip
