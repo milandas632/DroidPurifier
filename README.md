@@ -2,7 +2,7 @@
 
 Droid Purifier is an offline-first Flutter desktop assistant for **De-Googling and debloating Android phones over ADB without root**. It is intentionally conservative: the app does not guess that an unknown system package is safe.
 
-> Removing system packages can always carry device-specific risk. Droid Purifier combines a curated package knowledge list with a live scan of the connected phone and defaults unknown packages to **Unknown / Review** rather than “safe”.
+> Removing system packages can always carry device-specific risk. Droid Purifier combines dynamic device analysis with conservative package policy and defaults unknown system/vendor packages to **Review** rather than guessing that they are removable.
 >
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/83a35b68-f17a-4c33-ae6e-8d6d312464bb" />
 
@@ -13,31 +13,29 @@ YouTube: https://www.youtube.com/@TechyDruid
 
 ## Download
 
-**[Download the latest version of Droid Purifier](https://github.com/techydruid/DroidPurifier/releases/latest)**
+**[Download the latest published version of Droid Purifier](https://github.com/techydruid/DroidPurifier/releases/latest)**
 
-For most Windows users, download **DroidPurifier-Setup.exe**.  
-A portable ZIP version is also available on the release page.
+For most Windows users, use the Setup EXE from the release page. A portable ZIP is also provided.
 
-## Version 1.3.0 highlights
+## Version 1.4.0 highlights
 
-- Clean three-part interface: **De-Google / Apps / Restore**.
-- Large compact package list with two-line rows and explanations in tooltips.
-- Four user-facing classifications only:
-  - **Known Removable** — explicitly recognised and appropriate for bulk selection.
-  - **Feature Dependent** — Android should remain functional, but a specific feature/app can stop working.
-  - **Unknown** — Droid Purifier cannot verify the package; never bulk-selected.
-  - **Protected** — Android/OEM infrastructure or a critical role on this specific device.
-- **Recommended De-Google** selects only curated Google apps that are Known Removable.
-- **Full De-Google** additionally selects curated Google service/framework packages such as Play Services, GSF and Play Store, while dynamically protected Android core stays locked.
-- Presets replace the previous selection rather than accumulating selections.
-- **Analyze Phone** performs a dry-run safety scan without removing anything.
-- **Export report** saves a local JSON device/package analysis for troubleshooting or GitHub issue reports.
-- **Expert Mode** is hidden behind an explicit warning and allows advanced users to manually select protected packages.
-- Every removal gets a final safety re-scan immediately before execution.
-- Post-removal **health check** verifies ADB, System UI, Settings, launcher, keyboard and WebView availability.
-- Every removal batch is stored as a **session**, making whole-session rollback available from Restore.
-- Individual APK/split-APK backups are still supported.
-- No telemetry and no runtime network calls; analysis is performed locally through bundled ADB.
+Version 1.4.0 keeps the interface simple while moving more device-specific intelligence into the background scanner.
+
+- Dynamic detection of user apps, Google apps, OEM apps and system/vendor packages instead of relying mainly on hard-coded package names.
+- Real application labels and richer local metadata through the temporary on-device scan helper.
+- Manufacturer/ROM-aware OEM categorization.
+- Generic detection of future/unknown Google consumer apps when metadata supports that classification.
+- Four clear safety states: **Removable / Caution / Review / Protected**.
+- Live protection for launcher, keyboard, dialer, SMS, accessibility services, current WebView, APEX/Mainline modules and runtime overlays.
+- Data-sensitive warnings for apps such as Google Authenticator before removal.
+- Dynamic **Recommended** and **Full De-Google** presets.
+- Recommended and Full De-Google now show a clear active state: only the selected preset is highlighted.
+- App filtering is split into independent **Category** and **Status** filters so both can be combined without mixing different concepts in one menu.
+- Refined dark interface with subtle green accents, cleaner counters, clearer metadata tags, polished dialogs and more compact package rows.
+- **Review & remove** remains the primary action; **Analyze** remains secondary.
+- Typed confirmations use clearly muted placeholders such as `Type BACKUP here` and `Type EXPERT here`.
+- Batch health checkpoints, removal sessions and rollback support remain enabled.
+- No telemetry and no runtime network calls; analysis is performed locally through bundled ADB and the local scan helper.
 
 ## Dynamic device safety scan
 
@@ -45,6 +43,7 @@ Droid Purifier does not rely only on package names. On connection it probes the 
 
 - Android version and API level
 - system vs user packages
+- application labels and package metadata
 - APEX/Mainline packages
 - runtime resource overlays through Android's overlay manager
 - current launcher
@@ -55,33 +54,23 @@ Droid Purifier does not rely only on package names. On connection it probes the 
 - current/default browser
 - current WebView provider
 - device provisioning/setup state
+- OEM/vendor context such as manufacturer, brand and ROM naming
 
-Dynamic facts override static rules. For example, a keyboard package can be Feature Dependent on one phone but **Protected** on another phone when it is the active keyboard.
+Dynamic facts override static rules. For example, an app that would normally be removable can become **Protected** when it is the active launcher, keyboard, dialer, SMS handler, accessibility service or WebView provider.
 
-Unsupported commands on old/vendor Android builds fail conservatively; they do not cause unknown packages to become Known Removable.
+Unsupported commands on old/vendor Android builds fail conservatively; they do not cause unknown packages to become Removable.
 
 ## De-Google behavior
 
 ### Recommended De-Google
 
-Recommended De-Google is the conservative preset. It selects only explicitly curated Google consumer apps that Droid Purifier currently classifies as Known Removable on the connected phone.
+Recommended De-Google is the conservative preset. It dynamically selects Google consumer apps that Droid Purifier currently classifies as **Removable** on the connected phone.
 
-It deliberately does not automatically remove unknown Google packages, current role apps, Android Mainline/core components, overlays, or WebView.
+It deliberately does not automatically remove unknown Google background/system packages, current role apps, Android Mainline/core components, overlays, or WebView.
 
 ### Full De-Google
 
-Full De-Google additionally includes curated Google framework and feature packages such as:
-
-- Google Play Services
-- Google Services Framework
-- Google Play Store
-- Google app / Assistant
-- Google backup/restore and sync components
-- Google Location History
-- Android Auto
-- Digital Wellbeing
-- Google Text-to-Speech
-- other curated Google integrations
+Full De-Google additionally includes Google framework and feature packages that are classified as removable or caution-level candidates, such as Play Services, Google Services Framework and Play Store when the current device state allows them to be selected.
 
 Removing these can break third-party apps or features that depend on Google APIs, FCM, Play Integrity, Google account services, TTS, Android Auto, etc. Droid Purifier shows those consequences before removal.
 
@@ -95,12 +84,19 @@ Examples include Permission Controller, DocumentsUI, ExtServices, networking mod
 
 ## Manual Apps mode
 
-The Apps tab exposes all installed packages.
+The Apps tab exposes all installed packages while keeping the main workflow straightforward.
+
+Filters are separated by purpose:
+
+- **Category:** All / User apps / Google / OEM / System
+- **Status:** All / Removable / Caution / Review / Protected
+
+Both filters are applied together, so a user can—for example—show only OEM apps that are currently Caution, or only Google apps that are Removable.
 
 Normal mode:
 
-- Known Removable packages can be selected normally.
-- Feature Dependent and Unknown packages can be selected manually and receive stronger review warnings.
+- Removable packages can be selected normally.
+- Caution and Review packages can be selected manually and receive stronger review warnings.
 - Protected packages cannot be selected.
 
 Expert Mode:
@@ -109,7 +105,7 @@ Expert Mode:
 - Allows manual selection of Protected packages.
 - Protected removals require a stronger `FORCE` confirmation before execution.
 
-Presets never use Expert Mode and never auto-select Unknown or Protected packages.
+Presets never require Expert Mode and never auto-select Protected packages.
 
 ## Safety and rollback
 
@@ -144,17 +140,18 @@ Droid Purifier targets old Android package-manager workflows while adding newer 
 - Legacy Android uses widely available `pm`, `settings`, `dumpsys` and role/default-app fallbacks.
 - Android 10+ additionally receives APEX/Mainline detection when supported.
 - Overlay and role probes are capability-based: unsupported vendor commands are ignored safely.
-- Unknown future Android/OEM packages remain Unknown rather than being guessed removable.
+- Enhanced metadata scanning is local and falls back to ADB-only detection if the helper cannot be used.
+- Unknown future Android/OEM packages remain Review rather than being guessed removable.
 
-No static list can prove every proprietary OEM dependency on every Android release. Conservative Unknown classification is therefore a deliberate safety feature.
+No static list can prove every proprietary OEM dependency on every Android release. Conservative Review classification is therefore a deliberate safety feature.
 
 ## Build and release
 
-GitHub Actions validates Flutter analysis/tests, builds a real Windows x64 Flutter release, bundles Android Platform Tools, and creates:
+GitHub Actions validates Flutter analysis/tests, builds a real Windows x64 Flutter release, bundles Android Platform Tools and the local scan helper, and creates:
 
-- `DroidPurifier-Windows-x64.zip`
-- `DroidPurifier-Setup.exe`
-- `DroidPurifier-macOS.zip` on manual/tagged macOS runs
+- `DroidPurifier-1.4.0-Windows-x64.zip`
+- `DroidPurifier-1.4.0-Setup.exe`
+- `DroidPurifier-1.4.0-macOS.zip` on manual/tagged macOS runs
 
 The generated Windows runner opens with a larger workspace so the package list remains the main focus of the interface.
 
