@@ -498,7 +498,7 @@ class _HomePageState extends State<HomePage> {
     final failures = <String, String>{};
     final progress = ValueNotifier<String>('Starting…');
     var stoppedForHealth = false;
-    unawaited(showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) => PopScope(canPop: false, child: AlertDialog(title: const Text('Removing selected apps'), content: SizedBox(width: 540, child: ValueListenableBuilder<String>(valueListenable: progress, builder: (context, value, child) => Column(mainAxisSize: MainAxisSize.min, children: [const LinearProgressIndicator(), const SizedBox(height: 14), Text(value)]))))));
+    unawaited(showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) => PopScope(canPop: false, child: AlertDialog(title: const Text('Removing selected apps'), content: SizedBox(width: 540, child: ValueListenableBuilder<String>(valueListenable: progress, builder: (context, value, child) => Column(mainAxisSize: MainAxisSize.min, children: [const LinearProgressIndicator(), const SizedBox(height: 14), Text(value)])))))));
 
     for (var index = 0; index < packages.length; index++) {
       final packageName = packages[index];
