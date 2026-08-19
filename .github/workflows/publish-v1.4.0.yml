@@ -1,0 +1,80 @@
+name: Publish Droid Purifier v1.4.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-v1.4.0.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    name: Publish tested v1.4.0 build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tested Windows artifact from run 37
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p publish
+          gh run download 32265525228 --repo "$GITHUB_REPOSITORY" --name "DroidPurifier-1.4.0-Windows-x64" --dir publish
+          find publish -maxdepth 3 -type f -print
+          test -f publish/DroidPurifier-1.4.0-Windows-x64.zip
+          test -f publish/installer/DroidPurifier-1.4.0-Setup.exe
+          cp publish/installer/DroidPurifier-1.4.0-Setup.exe publish/DroidPurifier-1.4.0-Setup.exe
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Droid Purifier v1.4.0
+
+          Droid Purifier v1.4.0 introduces the new dynamic, device-aware scanner while keeping the interface simple for normal users.
+
+          ### Highlights
+          - Dynamic detection of user apps, Google apps, OEM apps, system/vendor packages and real app labels.
+          - Live protection for critical roles, WebView, APEX/Mainline modules and overlays.
+          - Manufacturer/ROM-aware classification with conservative handling of unknown system packages.
+          - Improved Recommended and Full De-Google presets.
+          - Separate Category and Status filters in Apps mode.
+          - Correct selected-state highlighting for De-Google presets.
+          - Refined dialogs, package metadata, counters, rows and confirmation placeholders.
+          - APK backup, session rollback and post-removal health checks.
+          - Bundled ADB and local Android scan helper. No root required.
+
+          ### Windows downloads
+          - `DroidPurifier-1.4.0-Setup.exe` — installer
+          - `DroidPurifier-1.4.0-Windows-x64.zip` — portable version
+
+          This release uses the exact Windows artifacts from successful GitHub Actions run #37 (internal build 8), which were tested before publication.
+
+          > Removing system apps can have device-specific consequences. Droid Purifier deliberately protects critical Android components and treats unknown system/OEM packages conservatively.
+          EOF
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.4.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.4.0 \
+              publish/DroidPurifier-1.4.0-Setup.exe \
+              publish/DroidPurifier-1.4.0-Windows-x64.zip \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit v1.4.0 \
+              --title "Droid Purifier v1.4.0" \
+              --notes-file release-notes.md \
+              --draft=false --prerelease=false --latest \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create v1.4.0 \
+              publish/DroidPurifier-1.4.0-Setup.exe \
+              publish/DroidPurifier-1.4.0-Windows-x64.zip \
+              --target c025547e6f08e05724fcc77d8323c43e4bb78613 \
+              --title "Droid Purifier v1.4.0" \
+              --notes-file release-notes.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          fi
